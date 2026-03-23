@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(tsx|ts|json|css\\)$\")",
+      "Bash(cd:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}
