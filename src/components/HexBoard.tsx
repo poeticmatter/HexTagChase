@@ -1,98 +1,133 @@
 import { motion } from 'motion/react'
-import type { Character, CharId, MovementArrow, HexCoord } from '../types'
-import { hexToPixel, hexPolygonPoints, HEX_RADIUS, getAllHexes } from '../lib/hexGrid'
-import { P1_CHAR_PAIRS, P2_CHAR_PAIRS } from '../lib/hexGameLogic'
+import type { HexCoord } from '../types'
+import { hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS } from '../lib/hexGrid'
+import { obstacleSet, validNeighbors } from '../lib/hexGameLogic'
+import type { PlanningPhase, DraftPlan } from './PlanningPanel'
 
-const HEX_SIZE = 20
-const PADDING = 28
+const HEX_SIZE = 38
+const PADDING  = 30
 
-const PAIR_COLORS = [
-  { fill: '#06b6d4', glow: '#06b6d460' }, // cyan   — pair 0
-  { fill: '#f97316', glow: '#f9731660' }, // orange — pair 1
-]
-
-function getCharColor(charId: CharId, playerRole: 1 | 2) {
-  const pairs = playerRole === 1 ? P1_CHAR_PAIRS : P2_CHAR_PAIRS
-  return PAIR_COLORS[pairs[0].includes(charId) ? 0 : 1]
-}
-
-// Board SVG dimensions: hex-shaped board of radius HEX_RADIUS centered at origin
 const SVG_WIDTH  = (3 * HEX_RADIUS + 2) * HEX_SIZE + PADDING * 2
 const SVG_HEIGHT = Math.sqrt(3) * HEX_SIZE * (2 * HEX_RADIUS + 1) + PADDING * 2
-const OFFSET_X   = SVG_WIDTH / 2
+const OFFSET_X   = SVG_WIDTH  / 2
 const OFFSET_Y   = SVG_HEIGHT / 2
 
 const ALL_HEXES = getAllHexes()
 
-// ── Arrow rendering ───────────────────────────────────────────────────────────
-
-function renderArrow(
-  arrow: MovementArrow,
-  playerRole: 1 | 2,
-  predictive: boolean,
-) {
-  const from = hexToPixel(arrow.fromQ, arrow.fromR, HEX_SIZE)
-  const to   = hexToPixel(arrow.toQ,   arrow.toR,   HEX_SIZE)
-  const fx = from.x + OFFSET_X
-  const fy = from.y + OFFSET_Y
-  const tx = to.x + OFFSET_X
-  const ty = to.y + OFFSET_Y
-
-  const dx = tx - fx
-  const dy = ty - fy
-  const len = Math.sqrt(dx * dx + dy * dy)
-  const shorten = HEX_SIZE * 0.55
-  const ex = len > shorten ? tx - (dx / len) * shorten : tx
-  const ey = len > shorten ? ty - (dy / len) * shorten : ty
-
-  const { fill } = getCharColor(arrow.charId, playerRole)
-  const markerId = predictive ? `arrowhead-p-${arrow.charId}` : `arrowhead-${arrow.charId}`
-
-  return (
-    <line
-      key={`${predictive ? 'p' : 'r'}-${arrow.charId}`}
-      x1={fx} y1={fy} x2={ex} y2={ey}
-      stroke={fill}
-      strokeWidth={predictive ? 1.5 : 2}
-      strokeOpacity={predictive ? 0.5 : 0.8}
-      strokeDasharray={predictive ? '4 3' : undefined}
-      markerEnd={`url(#${markerId})`}
-    />
-  )
+function hexKey(h: HexCoord): string {
+  return `${h.q},${h.r}`
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+function getValidTargets(
+  phase: PlanningPhase,
+  draft: DraftPlan,
+  myPos: HexCoord,
+  opponentPos: HexCoord,
+  obstacles: HexCoord[],
+): Set<string> {
+  const blocked = obstacleSet(obstacles)
+
+  switch (phase) {
+    case 'move_step1': {
+      // Adjacent to my position, not blocked, not opponent
+      const opponentKey = hexKey(opponentPos)
+      return new Set(
+        validNeighbors(myPos, blocked)
+          .filter(h => hexKey(h) !== opponentKey)
+          .map(hexKey)
+      )
+    }
+    case 'move_step2': {
+      if (!draft.moveStep1) return new Set()
+      const opponentKey = hexKey(opponentPos)
+      return new Set(
+        validNeighbors(draft.moveStep1, blocked)
+          .filter(h => hexKey(h) !== opponentKey)
+          .map(hexKey)
+      )
+    }
+    case 'predict_step1': {
+      return new Set(validNeighbors(opponentPos, blocked).map(hexKey))
+    }
+    case 'predict_step2': {
+      if (!draft.predictStep1) return new Set()
+      return new Set(validNeighbors(draft.predictStep1, blocked).map(hexKey))
+    }
+    case 'ready':
+      return new Set()
+  }
+}
+
+function pathPoints(a: HexCoord, b: HexCoord): { x1: number; y1: number; x2: number; y2: number } {
+  const pa = hexToPixel(a.q, a.r, HEX_SIZE)
+  const pb = hexToPixel(b.q, b.r, HEX_SIZE)
+  return {
+    x1: pa.x + OFFSET_X,
+    y1: pa.y + OFFSET_Y,
+    x2: pb.x + OFFSET_X,
+    y2: pb.y + OFFSET_Y,
+  }
+}
 
 interface Props {
-  characters: Character[]
+  myPos: HexCoord
+  opponentPos: HexCoord
+  prevMyPath: HexCoord[] | null
+  prevOpponentPath: HexCoord[] | null
+  isChaser: boolean
   obstacles: HexCoord[]
-  movementArrows: MovementArrow[]
-  predictiveArrows: MovementArrow[]
-  winner: 1 | 2 | null
-  playerRole: 1 | 2
+  planningPhase: PlanningPhase
+  draft: DraftPlan
+  waitingForPartner: boolean
+  winner: 'chaser' | 'evader' | null
+  onHexClick: (hex: HexCoord) => void
 }
 
-export function HexBoard({ characters, obstacles, movementArrows, predictiveArrows, winner, playerRole }: Props) {
-  const obstacleKeys = new Set(obstacles.map(o => `${o.q},${o.r}`))
+export function HexBoard({
+  myPos,
+  opponentPos,
+  prevMyPath,
+  prevOpponentPath,
+  isChaser,
+  obstacles,
+  planningPhase,
+  draft,
+  waitingForPartner,
+  winner,
+  onHexClick,
+}: Props) {
+  const obstacleKeys = obstacleSet(obstacles)
+  const validTargets = (!waitingForPartner && !winner)
+    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles)
+    : new Set<string>()
+
+  // Hexes that are part of the draft plan
+  const movePathKeys  = new Set([draft.moveStep1, draft.moveStep2].filter(Boolean).map(h => hexKey(h!)))
+  const predPathKeys  = new Set([draft.predictStep1, draft.predictStep2].filter(Boolean).map(h => hexKey(h!)))
+
+  const myColor       = isChaser ? '#ef4444' : '#3b82f6'   // red or blue
+  const opponentColor = isChaser ? '#3b82f6' : '#ef4444'
 
   return (
     <div className="relative select-none" style={{ width: SVG_WIDTH, height: SVG_HEIGHT }}>
-      <svg width={SVG_WIDTH} height={SVG_HEIGHT} className="absolute inset-0">
-        {/* Arrowhead markers */}
+      <svg
+        width={SVG_WIDTH}
+        height={SVG_HEIGHT}
+        className="absolute inset-0"
+      >
         <defs>
-          {(['A', 'B', 'C', 'D'] as CharId[]).map(id => {
-            const { fill } = getCharColor(id, playerRole)
-            return (
-              <g key={id}>
-                <marker id={`arrowhead-${id}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M 0 0 L 6 3 L 0 6 Z" fill={fill} />
-                </marker>
-                <marker id={`arrowhead-p-${id}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M 0 0 L 6 3 L 0 6 Z" fill={fill} fillOpacity="0.5" />
-                </marker>
-              </g>
-            )
-          })}
+          <marker id="arrow-move" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill={myColor} />
+          </marker>
+          <marker id="arrow-pred" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill="#a855f7" fillOpacity="0.7" />
+          </marker>
+          <marker id="arrow-last-my" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill={myColor} fillOpacity="0.5" />
+          </marker>
+          <marker id="arrow-last-opp" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill={opponentColor} fillOpacity="0.5" />
+          </marker>
         </defs>
 
         {/* Hex cells */}
@@ -100,78 +135,164 @@ export function HexBoard({ characters, obstacles, movementArrows, predictiveArro
           const { x, y } = hexToPixel(q, r, HEX_SIZE)
           const cx = x + OFFSET_X
           const cy = y + OFFSET_Y
-          const isObstacle = obstacleKeys.has(`${q},${r}`)
+          const key = `${q},${r}`
+          const isObstacle = obstacleKeys.has(key)
+          const isValid    = validTargets.has(key)
+          const isMovePath = movePathKeys.has(key)
+          const isPredPath = predPathKeys.has(key)
+
+          let fill = '#1a1a1a'
+          if (isObstacle)   fill = '#2d1f1f'
+          else if (isValid) fill = '#1e293b'
+
+          let stroke = '#2a2a2a'
+          let strokeWidth = 0.8
+          if (isObstacle)   { stroke = '#5a3030'; strokeWidth = 1 }
+          else if (isMovePath) { stroke = myColor; strokeWidth = 2 }
+          else if (isPredPath) { stroke = '#a855f7'; strokeWidth = 2 }
+          else if (isValid)    { stroke = '#60a5fa'; strokeWidth = 1.5 }
 
           return (
-            <g key={`${q},${r}`}>
-              <polygon
-                points={hexPolygonPoints(cx, cy, HEX_SIZE - 1)}
-                fill={isObstacle ? '#312820' : '#1a1a1a'}
-                stroke={isObstacle ? '#5a4030' : '#2a2a2a'}
-                strokeWidth={isObstacle ? 1 : 0.8}
-              />
-              <text
-                x={cx} y={cy + 1}
-                textAnchor="middle" dominantBaseline="middle"
-                fontSize={5} fill="#555" pointerEvents="none"
-              >
-                {q},{r}
-              </text>
-            </g>
+            <polygon
+              key={key}
+              points={hexPolygonPoints(cx, cy, HEX_SIZE - 1.5)}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              strokeOpacity={isValid ? 0.9 : 1}
+              style={{ cursor: isValid ? 'pointer' : 'default' }}
+              onClick={() => isValid && onHexClick({ q, r })}
+            />
           )
         })}
 
-        {/* Arrows */}
-        {movementArrows.map(a => renderArrow(a, playerRole, false))}
-        {predictiveArrows.map(a => renderArrow(a, playerRole, true))}
+        {/* Move path arrows */}
+        {draft.moveStep1 && (() => {
+          const { x1, y1, x2, y2 } = pathPoints(myPos, draft.moveStep1)
+          return <line x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
+            markerEnd="url(#arrow-move)" />
+        })()}
+        {draft.moveStep1 && draft.moveStep2 && (() => {
+          const { x1, y1, x2, y2 } = pathPoints(draft.moveStep1!, draft.moveStep2)
+          return <line x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
+            markerEnd="url(#arrow-move)" />
+        })()}
+
+        {/* Prediction path arrows (purple dashed) */}
+        {draft.predictStep1 && (() => {
+          const { x1, y1, x2, y2 } = pathPoints(opponentPos, draft.predictStep1)
+          return <line x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke="#a855f7" strokeWidth={2} strokeOpacity={0.6}
+            strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
+        })()}
+        {draft.predictStep1 && draft.predictStep2 && (() => {
+          const { x1, y1, x2, y2 } = pathPoints(draft.predictStep1!, draft.predictStep2)
+          return <line x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke="#a855f7" strokeWidth={2} strokeOpacity={0.6}
+            strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
+        })()}
+
+        {/* Last-round movement arrows: one segment per step */}
+        {prevMyPath && prevMyPath.slice(0, -1).map((from, i) => {
+          const to = prevMyPath[i + 1]
+          const { x1, y1, x2, y2 } = pathPoints(from, to)
+          const isLast = i === prevMyPath.length - 2
+          return (
+            <line key={`my-step-${i}`} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={myColor} strokeWidth={2} strokeOpacity={0.35}
+              markerEnd={isLast ? 'url(#arrow-last-my)' : undefined} />
+          )
+        })}
+        {prevOpponentPath && prevOpponentPath.slice(0, -1).map((from, i) => {
+          const to = prevOpponentPath[i + 1]
+          const { x1, y1, x2, y2 } = pathPoints(from, to)
+          const isLast = i === prevOpponentPath.length - 2
+          return (
+            <line key={`opp-step-${i}`} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={opponentColor} strokeWidth={2} strokeOpacity={0.35}
+              markerEnd={isLast ? 'url(#arrow-last-opp)' : undefined} />
+          )
+        })}
       </svg>
 
-      {/* Character tokens */}
-      {characters.map(char => {
-        const { x, y } = hexToPixel(char.q, char.r, HEX_SIZE)
-        const cx = x + OFFSET_X
-        const cy = y + OFFSET_Y
-        const tokenSize = HEX_SIZE * 1.1
-        const { fill, glow } = getCharColor(char.id, playerRole)
-
+      {/* Opponent token */}
+      {(() => {
+        const { x, y } = hexToPixel(opponentPos.q, opponentPos.r, HEX_SIZE)
+        const tokenSize = HEX_SIZE * 1.0
         return (
           <motion.div
-            key={char.id}
+            key="opponent"
             initial={false}
-            animate={{ x: cx - tokenSize / 2, y: cy - tokenSize / 2 }}
+            animate={{ x: x + OFFSET_X - tokenSize / 2, y: y + OFFSET_Y - tokenSize / 2 }}
             transition={{ type: 'spring', stiffness: 280, damping: 26 }}
             style={{
               position: 'absolute',
               width: tokenSize,
               height: tokenSize,
               borderRadius: '50%',
-              backgroundColor: fill,
-              boxShadow: `0 0 8px ${glow}`,
+              backgroundColor: opponentColor,
+              opacity: 0.5,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              fontSize: 11,
               fontWeight: 800,
-              fontSize: 9,
+              color: 'white',
+              zIndex: 9,
+              pointerEvents: 'none',
+            }}
+          >
+            {isChaser ? 'E' : 'C'}
+          </motion.div>
+        )
+      })()}
+
+      {/* My token */}
+      {(() => {
+        const { x, y } = hexToPixel(myPos.q, myPos.r, HEX_SIZE)
+        const tokenSize = HEX_SIZE * 1.1
+        return (
+          <motion.div
+            key="mine"
+            initial={false}
+            animate={{ x: x + OFFSET_X - tokenSize / 2, y: y + OFFSET_Y - tokenSize / 2 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+            style={{
+              position: 'absolute',
+              width: tokenSize,
+              height: tokenSize,
+              borderRadius: '50%',
+              backgroundColor: myColor,
+              boxShadow: `0 0 12px ${myColor}80`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 12,
+              fontWeight: 800,
               color: 'white',
               zIndex: 10,
               pointerEvents: 'none',
             }}
           >
-            {char.id}
+            {isChaser ? 'C' : 'E'}
           </motion.div>
         )
-      })}
+      })()}
 
       {/* Win overlay */}
       {winner && (
         <div
           className="absolute inset-0 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
         >
           <div className={`text-2xl font-bold px-6 py-3 rounded-xl ${
-            winner === 1 ? 'text-cyan-300 bg-cyan-900/60' : 'text-orange-300 bg-orange-900/60'
+            winner === 'chaser'
+              ? 'text-red-300 bg-red-900/60'
+              : 'text-blue-300 bg-blue-900/60'
           }`}>
-            Player {winner} wins!
+            {winner === 'chaser' ? 'Tagged!' : 'Evader survives!'}
           </div>
         </div>
       )}

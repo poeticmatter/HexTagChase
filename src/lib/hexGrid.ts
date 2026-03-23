@@ -1,5 +1,5 @@
 /** Radius of the hex-shaped board in hex steps from center. */
-export const HEX_RADIUS = 7
+export const HEX_RADIUS = 4
 
 /**
  * Axial distance between two hexes.

@@ -1,22 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
-import type { GameState, PlayerAssignment, ConnectionStatus } from '../types'
-import { getInitialCharacters, generateObstacles, resolveMovement, checkWinner, computeMovementArrows } from '../lib/hexGameLogic'
+import type { GameState, TurnPlan, ConnectionStatus } from '../types'
+import { getInitialPositions, generateObstacles, resolveRound } from '../lib/hexGameLogic'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
-  | { type: 'CONFIRM_ASSIGNMENT'; assignment: PlayerAssignment }
+  | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
 
 function buildInitialState(): GameState {
+  const { chaserPos, evaderPos } = getInitialPositions()
   return {
-    characters: getInitialCharacters(),
-    phase: 'assignment',
-    p1Assignment: null,
-    p2Assignment: null,
-    round: 1,
+    chaserPos,
+    evaderPos,
+    prevChaserPath: null,
+    prevEvaderPath: null,
+    phase: 'planning',
+    turn: 1,
     winner: null,
-    movementArrows: [],
-    obstacles: generateObstacles(),
+    obstacles: generateObstacles(chaserPos, evaderPos),
+    p1Plan: null,
+    p2Plan: null,
+    lastResolution: null,
   }
 }
 
@@ -24,12 +28,12 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
-  const [waitingForPartnerConfirm, setWaitingForPartnerConfirm] = useState(false)
+  const [waitingForPartner, setWaitingForPartner] = useState(false)
 
   const live = useRef({
     state: null as GameState | null,
     conn: null as DataConnection | null,
-    pendingP2Assignment: null as PlayerAssignment | null,
+    pendingP2Plan: null as TurnPlan | null,
   })
 
   const syncState = useCallback((next: GameState) => {
@@ -37,33 +41,20 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
     setGameState(next)
   }, [])
 
-  const resolveRound = useCallback((p1a: PlayerAssignment, p2a: PlayerAssignment) => {
+  const resolveRoundAndSync = useCallback((p1Plan: TurnPlan, p2Plan: TurnPlan) => {
     const current = live.current.state
     if (!current) return
 
-    const withAssignments: GameState = { ...current, p1Assignment: p1a, p2Assignment: p2a }
-    const newChars = resolveMovement(withAssignments)
-    const winner = checkWinner(newChars)
-    const nextState: GameState = {
-      characters: newChars,
-      phase: 'assignment',
-      p1Assignment: null,
-      p2Assignment: null,
-      round: current.round + 1,
-      winner,
-      movementArrows: computeMovementArrows(current.characters, newChars),
-      obstacles: current.obstacles,
-    }
-
+    const nextState = resolveRound(current, p1Plan, p2Plan)
     syncState(nextState)
-    live.current.pendingP2Assignment = null
-    setWaitingForPartnerConfirm(false)
+    live.current.pendingP2Plan = null
+    setWaitingForPartner(false)
     live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
   }, [syncState])
 
   useEffect(() => {
     const peer = playerRole === 1
-      ? new Peer(`hex-duel-${roomCode}`)
+      ? new Peer(`hex-tag-${roomCode}`)
       : new Peer()
 
     const onDisconnect = () => setStatus('disconnected')
@@ -71,7 +62,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
 
     if (playerRole === 1) {
       syncState(buildInitialState())
-
       peer.on('open', () => setStatus('waiting_for_partner'))
 
       peer.on('connection', (conn: DataConnection) => {
@@ -85,12 +75,12 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
 
         conn.on('data', (raw: unknown) => {
           const msg = raw as PeerMessage
-          if (msg.type !== 'CONFIRM_ASSIGNMENT') return
+          if (msg.type !== 'SUBMIT_PLAN') return
 
-          live.current.pendingP2Assignment = msg.assignment
+          live.current.pendingP2Plan = msg.plan
           const current = live.current.state
-          if (current?.p1Assignment) {
-            resolveRound(current.p1Assignment, msg.assignment)
+          if (current?.p1Plan) {
+            resolveRoundAndSync(current.p1Plan, msg.plan)
           }
         })
 
@@ -102,10 +92,9 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
         if (err.type === 'unavailable-id') onError('Room code already in use.')
         else onError(err.message || 'Connection error.')
       })
-
     } else {
       peer.on('open', () => {
-        const conn = peer.connect(`hex-duel-${roomCode}`, { reliable: true })
+        const conn = peer.connect(`hex-tag-${roomCode}`, { reliable: true })
         live.current.conn = conn
         setStatus('waiting_for_level')
 
@@ -113,7 +102,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
           const msg = raw as PeerMessage
           if (msg.type === 'GAME_STATE') {
             syncState(msg.state)
-            setWaitingForPartnerConfirm(false)
+            setWaitingForPartner(false)
             setStatus('playing')
           }
         })
@@ -132,25 +121,25 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
       live.current.conn?.close()
       peer.destroy()
     }
-  }, [roomCode, playerRole, syncState, resolveRound])
+  }, [roomCode, playerRole, syncState, resolveRoundAndSync])
 
-  const confirmAssignment = useCallback((assignment: PlayerAssignment) => {
+  const submitPlan = useCallback((plan: TurnPlan) => {
     if (playerRole === 1) {
       const current = live.current.state
       if (!current) return
 
-      const p2Assignment = live.current.pendingP2Assignment
-      if (p2Assignment) {
-        resolveRound(assignment, p2Assignment)
+      const p2Plan = live.current.pendingP2Plan
+      if (p2Plan) {
+        resolveRoundAndSync(plan, p2Plan)
       } else {
-        syncState({ ...current, p1Assignment: assignment })
-        setWaitingForPartnerConfirm(true)
+        syncState({ ...current, p1Plan: plan })
+        setWaitingForPartner(true)
       }
     } else {
-      live.current.conn?.send({ type: 'CONFIRM_ASSIGNMENT', assignment } as PeerMessage)
-      setWaitingForPartnerConfirm(true)
+      live.current.conn?.send({ type: 'SUBMIT_PLAN', plan } as PeerMessage)
+      setWaitingForPartner(true)
     }
-  }, [playerRole, syncState, resolveRound])
+  }, [playerRole, syncState, resolveRoundAndSync])
 
-  return { gameState, status, errorMsg, waitingForPartnerConfirm, confirmAssignment }
+  return { gameState, status, errorMsg, waitingForPartner, submitPlan }
 }

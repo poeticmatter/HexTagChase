@@ -1,81 +1,58 @@
-import type {
-  Character, CharId, CardOption, GameState,
-  PlayerAssignment, MovementArrow, HexCoord,
-} from '../types'
-import { isOnBoard, HEX_DIRECTIONS, HEX_RADIUS, hexDistance, getAllHexes } from './hexGrid'
+import type { HexCoord, GameState, TurnPlan, PredictionQuality, ResolutionSummary } from '../types'
+import { HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes } from './hexGrid'
 
-// ── Pairings ───────────────────────────────────────────────────────────────────
-// P1: char pairs {A,B} and {C,D}
-// P2: char pairs {A,C} and {B,D}
+export const MAX_TURNS = 20
 
-export const P1_CHAR_PAIRS: [CharId, CharId][] = [['A', 'B'], ['C', 'D']]
-export const P2_CHAR_PAIRS: [CharId, CharId][] = [['A', 'C'], ['B', 'D']]
+// ── Starting positions ─────────────────────────────────────────────────────
 
-// ── Card → direction ──────────────────────────────────────────────────────────
-//
-// Three base options (flat-top hex):
-//   Card 1 = Up           (dir 1, axial 0,-1)
-//   Card 2 = Lower-right  (dir 3, axial +1,0)
-//   Card 3 = Lower-left   (dir 5, axial -1,+1)
-//
-// When a character receives one card from each player, the directions are
-// averaged in pixel space; the result maps exactly to one of the 6 hex dirs:
-//   1+1 → Up (1)          2+2 → Lower-right (3)    3+3 → Lower-left (5)
-//   1+2 → Upper-right (2) 1+3 → Upper-left (6)     2+3 → Down (4)
-
-const COMBINED_DIRECTION: Record<string, number> = {
-  '1,1': 1,  '2,2': 3,  '3,3': 5,
-  '1,2': 2,  '2,1': 2,
-  '1,3': 6,  '3,1': 6,
-  '2,3': 4,  '3,2': 4,
+export function getInitialPositions(): { chaserPos: HexCoord; evaderPos: HexCoord } {
+  return {
+    chaserPos: { q: -3, r: 0 },
+    evaderPos: { q: 3, r: 0 },
+  }
 }
 
-export const CARD_LABELS: Record<CardOption, string> = {
-  1: '↑ Up',
-  2: '↘ Lower-right',
-  3: '↙ Lower-left',
-}
+// ── Obstacles ──────────────────────────────────────────────────────────────
 
-function getDirection(card1: CardOption, card2: CardOption): number {
-  return COMBINED_DIRECTION[`${card1},${card2}`]
-}
-
-function getCardForChar(charId: CharId, assignment: PlayerAssignment, charPairs: [CharId, CharId][]): CardOption {
-  return charPairs[0].includes(charId) ? assignment.pair0Card : assignment.pair1Card
-}
-
-// ── Initial state ──────────────────────────────────────────────────────────────
-
-export function getInitialCharacters(): Character[] {
-  // Spread 4 characters at compass points, distance 4 from center
-  return [
-    { id: 'A', q: -5, r:  1 },
-    { id: 'B', q:  1, r: -5 },
-    { id: 'C', q: -1, r:  5 },
-    { id: 'D', q:  5, r: -1 },
-  ]
-}
-
-// ── Obstacles ─────────────────────────────────────────────────────────────────
-
-/** Build a fast lookup Set from the obstacles array (key = "q,r"). */
 export function obstacleSet(obstacles: HexCoord[]): Set<string> {
-  return new Set(obstacles.map(o => `${o.q},${o.r}`))
+  return new Set(obstacles.map(h => `${h.q},${h.r}`))
 }
 
 /**
- * Randomly place obstacles on interior hexes, targeting ~1/24 of the board.
- * Never blocks hexes within 3 steps of a starting character.
+ * Returns true if placing an obstacle at `hex` would create a connected cluster of 3+.
+ * A cluster of 3 forms when the new hex joins two already-adjacent obstacles,
+ * or when it extends a pair (a neighbor that already has its own obstacle neighbor).
  */
-export function generateObstacles(): HexCoord[] {
-  const startingChars = getInitialCharacters()
-  const allHexes = getAllHexes()
-  const totalHexes = allHexes.length // 169 for radius 7
+function wouldMakeClusterOfThree(hex: HexCoord, placed: Set<string>): boolean {
+  const obstacleNeighbors = Object.values(HEX_DIRECTIONS)
+    .map(({ dq, dr }) => ({ q: hex.q + dq, r: hex.r + dr }))
+    .filter(n => placed.has(`${n.q},${n.r}`))
 
+  // Two or more obstacle neighbors → merges separate groups or extends beyond 2
+  if (obstacleNeighbors.length >= 2) return true
+
+  // One obstacle neighbor → only safe if that neighbor has no other obstacle neighbors
+  if (obstacleNeighbors.length === 1) {
+    const neighbor = obstacleNeighbors[0]
+    const neighborObstacleNeighborCount = Object.values(HEX_DIRECTIONS)
+      .map(({ dq, dr }) => ({ q: neighbor.q + dq, r: neighbor.r + dr }))
+      .filter(n => placed.has(`${n.q},${n.r}`) && !(n.q === hex.q && n.r === hex.r))
+      .length
+    if (neighborObstacleNeighborCount >= 1) return true
+  }
+
+  return false
+}
+
+export function generateObstacles(chaserPos: HexCoord, evaderPos: HexCoord): HexCoord[] {
+  const allHexes = getAllHexes()
+
+  // Exclude the outer two rings and hexes too close to starting positions
   const candidates = allHexes.filter(({ q, r }) => {
-    // Keep the immediate neighbours of each starting character clear
-    const tooClose = startingChars.some(c => hexDistance(q, r, c.q, c.r) <= 1)
-    return !tooClose
+    const notNearEdge    = hexDistance(0, 0, q, r) < HEX_RADIUS
+    const clearOfChaser  = hexDistance(q, r, chaserPos.q, chaserPos.r) > 2
+    const clearOfEvader  = hexDistance(q, r, evaderPos.q, evaderPos.r) > 2
+    return notNearEdge && clearOfChaser && clearOfEvader
   })
 
   // Fisher-Yates shuffle
@@ -84,120 +61,170 @@ export function generateObstacles(): HexCoord[] {
     ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
   }
 
-  return candidates.slice(0, Math.round(totalHexes / 6))
-}
+  const target = Math.round(allHexes.length / 6)
+  const placed = new Set<string>()
+  const result: HexCoord[] = []
 
-// ── Arrows ─────────────────────────────────────────────────────────────────────
-
-export function computeMovementArrows(before: Character[], after: Character[]): MovementArrow[] {
-  return before.flatMap(c => {
-    const next = after.find(n => n.id === c.id)!
-    if (next.q === c.q && next.r === c.r) return []
-    return [{ charId: c.id, fromQ: c.q, fromR: c.r, toQ: next.q, toR: next.r }]
-  })
-}
-
-// ── Movement ───────────────────────────────────────────────────────────────────
-
-const CHAR_ORDER: CharId[] = ['A', 'B', 'C', 'D']
-
-function moveCharacter(
-  char: Character,
-  direction: number,
-  blocked: Set<string>,
-): Character {
-  const dir = HEX_DIRECTIONS[direction]
-  if (!dir) return char
-
-  const nq = char.q + dir.dq
-  const nr = char.r + dir.dr
-
-  if (!isOnBoard(nq, nr)) return char
-  if (blocked.has(`${nq},${nr}`)) return char
-
-  return { ...char, q: nq, r: nr }
-}
-
-function applyAssignments(
-  characters: Character[],
-  p1Assignment: PlayerAssignment,
-  p2Assignment: PlayerAssignment | null,
-  blocked: Set<string>,
-): Character[] {
-  let current = [...characters]
-
-  for (const charId of CHAR_ORDER) {
-    const p1Card = getCardForChar(charId, p1Assignment, P1_CHAR_PAIRS)
-    // When P2 assignment is unknown (predictive mode), treat both cards as P1's
-    const p2Card = p2Assignment
-      ? getCardForChar(charId, p2Assignment, P2_CHAR_PAIRS)
-      : p1Card
-    const direction = getDirection(p1Card, p2Card)
-    current = current.map(c =>
-      c.id === charId ? moveCharacter(c, direction, blocked) : c
-    )
+  for (const hex of candidates) {
+    if (result.length >= target) break
+    if (wouldMakeClusterOfThree(hex, placed)) continue
+    placed.add(`${hex.q},${hex.r}`)
+    result.push(hex)
   }
 
-  return current
+  return result
 }
 
-/** Full resolution with both players' assignments. */
-export function resolveMovement(state: GameState): Character[] {
-  const { characters, p1Assignment, p2Assignment, obstacles } = state
-  if (!p1Assignment || !p2Assignment) return characters
-  return applyAssignments(characters, p1Assignment, p2Assignment, obstacleSet(obstacles))
+// ── Neighbors ─────────────────────────────────────────────────────────────
+
+/** All valid (on-board, non-obstacle) neighbors of a hex. */
+export function validNeighbors(pos: HexCoord, blocked: Set<string>): HexCoord[] {
+  return Object.values(HEX_DIRECTIONS)
+    .map(({ dq, dr }) => ({ q: pos.q + dq, r: pos.r + dr }))
+    .filter(({ q, r }) => isOnBoard(q, r) && !blocked.has(`${q},${r}`))
 }
 
-/**
- * Predictive resolution using only one player's assignment.
- * Assumes the other player makes the same choice (shows the "clean" direction).
- */
-export function resolveOnePlayerMovement(
-  characters: Character[],
-  playerRole: 1 | 2,
-  assignment: PlayerAssignment,
-  obstacles: HexCoord[],
-): Character[] {
-  // Pass assignment as both P1 and P2 — applyAssignments will derive direction from
-  // (myCard, myCard) which maps to the base direction for that card.
-  const p1 = playerRole === 1 ? assignment : { pair0Card: 1 as CardOption, pair1Card: 1 as CardOption }
-  const p2 = playerRole === 2 ? assignment : null
-  const blocked = obstacleSet(obstacles)
-
-  if (playerRole === 1) {
-    return applyAssignments(characters, assignment, null, blocked)
-  } else {
-    // For P2: we need to figure out what direction P2's card produces alone.
-    // Use P2_CHAR_PAIRS and treat P1 as having the same card.
-    let current = [...characters]
-    for (const charId of CHAR_ORDER) {
-      const card = getCardForChar(charId, assignment, P2_CHAR_PAIRS)
-      const direction = getDirection(card, card) // same card → base direction
-      current = current.map(c =>
-        c.id === charId ? moveCharacter(c, direction, blocked) : c
-      )
-    }
-    return current
+/** Direction index (1-6) between two adjacent hexes, or null if not adjacent. */
+export function directionBetween(from: HexCoord, to: HexCoord): number | null {
+  const dq = to.q - from.q
+  const dr = to.r - from.r
+  for (const [idx, dir] of Object.entries(HEX_DIRECTIONS)) {
+    if (dir.dq === dq && dir.dr === dr) return Number(idx)
   }
-}
-
-// ── Win condition ──────────────────────────────────────────────────────────────
-
-function adjacent(characters: Character[], a: CharId, b: CharId): boolean {
-  const ca = characters.find(c => c.id === a)!
-  const cb = characters.find(c => c.id === b)!
-  return hexDistance(ca.q, ca.r, cb.q, cb.r) === 1
-}
-
-/**
- * P1 wins if A is adjacent to C, or D is adjacent to B.
- * P2 wins if C is adjacent to D, or B is adjacent to A.
- */
-export function checkWinner(characters: Character[]): 1 | 2 | null {
-  const p1Wins = adjacent(characters, 'A', 'C') || adjacent(characters, 'D', 'B')
-  const p2Wins = adjacent(characters, 'C', 'D') || adjacent(characters, 'B', 'A')
-
-  if (p1Wins) return 1
-  if (p2Wins) return 2
   return null
+}
+
+// ── Prediction assessment ─────────────────────────────────────────────────
+
+/**
+ * For each of the two planned steps, check whether the predicted direction matches
+ * the actual direction. A matched step is cancelled — the character skips it.
+ *
+ * Direction for step 1: from shared start to step1.
+ * Direction for step 2: from actual step1 to step2 (vs predicted step1 to predicted step2).
+ * Both are purely directional comparisons, independent of absolute positions.
+ */
+function matchedSteps(
+  start: HexCoord,
+  actualStep1: HexCoord,
+  actualStep2: HexCoord,
+  predictedStep1: HexCoord,
+  predictedStep2: HexCoord,
+): [boolean, boolean] {
+  const actualDir1 = directionBetween(start, actualStep1)
+  const actualDir2 = directionBetween(actualStep1, actualStep2)
+  const predDir1   = directionBetween(start, predictedStep1)
+  const predDir2   = directionBetween(predictedStep1, predictedStep2)
+
+  const match1 = actualDir1 !== null && predDir1 !== null && actualDir1 === predDir1
+  const match2 = actualDir2 !== null && predDir2 !== null && actualDir2 === predDir2
+  return [match1, match2]
+}
+
+function qualityFromMatches(cancelled: [boolean, boolean]): PredictionQuality {
+  const count = (cancelled[0] ? 1 : 0) + (cancelled[1] ? 1 : 0)
+  if (count === 2) return 'full'
+  if (count === 1) return 'partial'
+  return 'none'
+}
+
+// ── Movement ──────────────────────────────────────────────────────────────
+
+function stepOne(pos: HexCoord, dirIndex: number, blocked: Set<string>): HexCoord {
+  const dir = HEX_DIRECTIONS[dirIndex]
+  if (!dir) return pos
+  const nq = pos.q + dir.dq
+  const nr = pos.r + dir.dr
+  if (!isOnBoard(nq, nr) || blocked.has(`${nq},${nr}`)) return pos
+  return { q: nq, r: nr }
+}
+
+/**
+ * Execute a 2-step planned path with per-step cancellation.
+ * Cancelled steps are skipped; the remaining step(s) still execute from current position.
+ * Returns the sequence of positions actually visited (0–2 entries).
+ *
+ * Example: plan [up, left], cancelled=[true, false] (step 1 cancelled)
+ *   → only "left" executes, from the original start position → 1 position in result.
+ */
+function executePath(
+  startPos: HexCoord,
+  step1Target: HexCoord,
+  step2Target: HexCoord,
+  cancelled: [boolean, boolean],
+  blocked: Set<string>,
+): HexCoord[] {
+  const dir1 = directionBetween(startPos, step1Target)
+  const dir2 = directionBetween(step1Target, step2Target)
+
+  const visited: HexCoord[] = []
+  let pos = startPos
+
+  if (!cancelled[0] && dir1 !== null) {
+    pos = stepOne(pos, dir1, blocked)
+    visited.push(pos)
+  }
+
+  if (!cancelled[1] && dir2 !== null) {
+    pos = stepOne(pos, dir2, blocked)
+    visited.push(pos)
+  }
+
+  return visited
+}
+
+// ── Round resolution ───────────────────────────────────────────────────────
+
+export function resolveRound(
+  state: GameState,
+  p1Plan: TurnPlan,
+  p2Plan: TurnPlan,
+): GameState {
+  const { chaserPos, evaderPos, obstacles, turn } = state
+  const baseBlocked = obstacleSet(obstacles)
+
+  // Determine which steps are cancelled for each player (opponent's matched prediction cancels that step)
+  const chaserCancelledSteps = matchedSteps(
+    chaserPos, p1Plan.moveStep1, p1Plan.moveStep2,
+    p2Plan.predictStep1, p2Plan.predictStep2,
+  )
+  const evaderCancelledSteps = matchedSteps(
+    evaderPos, p2Plan.moveStep1, p2Plan.moveStep2,
+    p1Plan.predictStep1, p1Plan.predictStep2,
+  )
+
+  // Move chaser with their cancelled steps applied
+  const chaserBlocked = new Set([...baseBlocked, `${evaderPos.q},${evaderPos.r}`])
+  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, chaserBlocked)
+  const newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
+
+  // Move evader with their cancelled steps applied, blocked by chaser's new position
+  const evaderBlocked = new Set([...baseBlocked, `${newChaserPos.q},${newChaserPos.r}`])
+  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, evaderBlocked)
+  const newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
+
+  const resolution: ResolutionSummary = {
+    chaserPredQuality: qualityFromMatches(evaderCancelledSteps),
+    evaderPredQuality: qualityFromMatches(chaserCancelledSteps),
+    chaserCancelledSteps,
+    evaderCancelledSteps,
+  }
+
+  // Win conditions
+  const chaserCatches = hexDistance(newChaserPos.q, newChaserPos.r, newEvaderPos.q, newEvaderPos.r) <= 1
+  const evaderSurvives = !chaserCatches && turn >= MAX_TURNS
+  const winner = chaserCatches ? 'chaser' : evaderSurvives ? 'evader' : null
+
+  return {
+    ...state,
+    chaserPos: newChaserPos,
+    evaderPos: newEvaderPos,
+    prevChaserPath: chaserPath.length > 0 ? [chaserPos, ...chaserPath] : null,
+    prevEvaderPath: evaderPath.length > 0 ? [evaderPos, ...evaderPath] : null,
+    turn: turn + 1,
+    winner,
+    p1Plan: null,
+    p2Plan: null,
+    lastResolution: resolution,
+  }
 }
