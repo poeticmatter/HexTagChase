@@ -11,14 +11,15 @@ export interface GameSettings {
   gridType: 'hex' | 'square'
   moveSteps: 1 | 2
   predictionTarget: 'direction' | 'destination'
-  predictionOutcome: 'symmetric' | 'asymmetric'
+  /** freeze-both: correct prediction freezes opponent. bonus-both: correct prediction unlocks your own bonus move. freeze-and-bonus: chaser freezes evader, evader unlocks bonus move. */
+  predictionOutcome: 'freeze-both' | 'bonus-both' | 'freeze-and-bonus'
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
   gridType: 'hex',
   moveSteps: 2,
   predictionTarget: 'direction',
-  predictionOutcome: 'symmetric',
+  predictionOutcome: 'freeze-both',
 }
 
 /** A submitted plan for one turn. */
@@ -27,7 +28,7 @@ export interface TurnPlan {
   moveStep2?: HexCoord      // absent in 1-step mode
   predictStep1: HexCoord
   predictStep2?: HexCoord   // absent in 1-step mode
-  bonusMove?: HexCoord      // evader only, asymmetric mode; executed only if prediction hit
+  bonusMove?: HexCoord      // bonus-both: both players; freeze-and-bonus: evader only; executed only if prediction hit
 }
 
 export interface ResolutionSummary {
@@ -35,7 +36,8 @@ export interface ResolutionSummary {
   evaderPredQuality: PredictionQuality
   chaserCancelledSteps: [boolean, boolean]
   evaderCancelledSteps: [boolean, boolean]
-  evaderBonusUsed?: boolean  // asymmetric mode only
+  chaserBonusUsed?: boolean  // bonus-both mode only
+  evaderBonusUsed?: boolean  // bonus-both and freeze-and-bonus modes
 }
 
 export interface GameState {

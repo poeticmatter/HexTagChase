@@ -296,12 +296,13 @@ export function resolveRound(
   p1Plan: TurnPlan,
   p2Plan: TurnPlan,
 ): GameState {
-  return state.settings.predictionOutcome === 'asymmetric'
-    ? resolveRoundAsymmetric(state, p1Plan, p2Plan)
-    : resolveRoundSymmetric(state, p1Plan, p2Plan)
+  const { predictionOutcome } = state.settings
+  if (predictionOutcome === 'freeze-and-bonus') return resolveRoundFreezeAndBonus(state, p1Plan, p2Plan)
+  if (predictionOutcome === 'bonus-both')       return resolveRoundBonusBoth(state, p1Plan, p2Plan)
+  return resolveRoundFreezeBoth(state, p1Plan, p2Plan)
 }
 
-function resolveRoundSymmetric(
+function resolveRoundFreezeBoth(
   state: GameState,
   p1Plan: TurnPlan,
   p2Plan: TurnPlan,
@@ -323,12 +324,10 @@ function resolveRoundSymmetric(
   )
 
   const { predictionTarget } = settings
-  const chaserBlocked = new Set([...baseBlocked, `${evaderPos.q},${evaderPos.r}`])
-  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, chaserBlocked, gridType, predictionTarget)
+  // Both paths computed with only obstacles — no opponent blocking (simultaneous movement)
+  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, baseBlocked, gridType, predictionTarget)
+  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, baseBlocked, gridType, predictionTarget)
   const newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
-
-  const evaderBlocked = new Set([...baseBlocked, `${newChaserPos.q},${newChaserPos.r}`])
-  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, evaderBlocked, gridType, predictionTarget)
   const newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
 
   const resolution: ResolutionSummary = {
@@ -341,7 +340,7 @@ function resolveRoundSymmetric(
   return buildNextState(state, newChaserPos, newEvaderPos, chaserPath, evaderPath, resolution)
 }
 
-function resolveRoundAsymmetric(
+function resolveRoundFreezeAndBonus(
   state: GameState,
   p1Plan: TurnPlan,
   p2Plan: TurnPlan,
@@ -351,7 +350,7 @@ function resolveRoundAsymmetric(
   const baseBlocked = obstacleSet(obstacles)
   const directions = getDirections(gridType)
 
-  // Chaser prediction cancels evader steps (same as symmetric)
+  // Chaser prediction cancels evader steps
   const evaderCancelledSteps = matchedSteps(
     evaderPos, p2Plan.moveStep1, p2Plan.moveStep2,
     p1Plan.predictStep1, p1Plan.predictStep2,
@@ -367,26 +366,20 @@ function resolveRoundAsymmetric(
   const evaderPredHit = evaderPredMatches[0] || evaderPredMatches[1]
   const chaserCancelledSteps: [boolean, boolean] = [false, false]
 
-  // Chaser moves normally (evader prediction cannot cancel chaser)
   const { predictionTarget } = settings
-  const chaserBlocked = new Set([...baseBlocked, `${evaderPos.q},${evaderPos.r}`])
-  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, chaserBlocked, gridType, predictionTarget)
+  // Both paths computed with only obstacles — no opponent blocking (simultaneous movement)
+  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, baseBlocked, gridType, predictionTarget)
+  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, baseBlocked, gridType, predictionTarget)
   const newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
-
-  // Evader moves with their steps potentially cancelled by chaser
-  const evaderBlocked = new Set([...baseBlocked, `${newChaserPos.q},${newChaserPos.r}`])
-  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, evaderBlocked, gridType, predictionTarget)
   let newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
 
   // Bonus move: if evader predicted correctly and pre-committed a bonus move
   let evaderBonusUsed = false
   if (evaderPredHit && p2Plan.bonusMove) {
-    // Direction extracted relative to planned final position, applied from actual final position
     const planEndPos = p2Plan.moveStep2 ?? p2Plan.moveStep1
     const bonusDir = directionBetween(planEndPos, p2Plan.bonusMove, directions)
     if (bonusDir !== null) {
-      const bonusBlocked = new Set([...baseBlocked, `${newChaserPos.q},${newChaserPos.r}`])
-      const bonusPos = stepOne(newEvaderPos, bonusDir, bonusBlocked, gridType)
+      const bonusPos = stepOne(newEvaderPos, bonusDir, baseBlocked, gridType)
       if (bonusPos.q !== newEvaderPos.q || bonusPos.r !== newEvaderPos.r) {
         evaderPath.push(bonusPos)
         newEvaderPos = bonusPos
@@ -406,6 +399,81 @@ function resolveRoundAsymmetric(
   return buildNextState(state, newChaserPos, newEvaderPos, chaserPath, evaderPath, resolution)
 }
 
+function resolveRoundBonusBoth(
+  state: GameState,
+  p1Plan: TurnPlan,
+  p2Plan: TurnPlan,
+): GameState {
+  const { chaserPos, evaderPos, obstacles, settings } = state
+  const { gridType, moveSteps } = settings
+  const baseBlocked = obstacleSet(obstacles)
+  const directions = getDirections(gridType)
+
+  // Neither player's prediction cancels opponent steps; both unlock their own bonus move
+  const chaserCancelledSteps: [boolean, boolean] = [false, false]
+  const evaderCancelledSteps: [boolean, boolean] = [false, false]
+
+  const chaserPredMatches = matchedSteps(
+    evaderPos, p2Plan.moveStep1, p2Plan.moveStep2,
+    p1Plan.predictStep1, p1Plan.predictStep2,
+    settings,
+  )
+  const evaderPredMatches = matchedSteps(
+    chaserPos, p1Plan.moveStep1, p1Plan.moveStep2,
+    p2Plan.predictStep1, p2Plan.predictStep2,
+    settings,
+  )
+  const chaserPredHit = chaserPredMatches[0] || chaserPredMatches[1]
+  const evaderPredHit = evaderPredMatches[0] || evaderPredMatches[1]
+
+  const { predictionTarget } = settings
+  // Both paths computed with only obstacles — no opponent blocking (simultaneous movement)
+  const chaserPath = executePath(chaserPos, p1Plan.moveStep1, p1Plan.moveStep2, chaserCancelledSteps, baseBlocked, gridType, predictionTarget)
+  const evaderPath = executePath(evaderPos, p2Plan.moveStep1, p2Plan.moveStep2, evaderCancelledSteps, baseBlocked, gridType, predictionTarget)
+  let newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
+  let newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
+
+  // Both bonus moves computed simultaneously with only obstacles blocked
+  let chaserBonusUsed = false
+  if (chaserPredHit && p1Plan.bonusMove) {
+    const planEndPos = p1Plan.moveStep2 ?? p1Plan.moveStep1
+    const bonusDir = directionBetween(planEndPos, p1Plan.bonusMove, directions)
+    if (bonusDir !== null) {
+      const bonusPos = stepOne(newChaserPos, bonusDir, baseBlocked, gridType)
+      if (bonusPos.q !== newChaserPos.q || bonusPos.r !== newChaserPos.r) {
+        chaserPath.push(bonusPos)
+        newChaserPos = bonusPos
+        chaserBonusUsed = true
+      }
+    }
+  }
+
+  let evaderBonusUsed = false
+  if (evaderPredHit && p2Plan.bonusMove) {
+    const planEndPos = p2Plan.moveStep2 ?? p2Plan.moveStep1
+    const bonusDir = directionBetween(planEndPos, p2Plan.bonusMove, directions)
+    if (bonusDir !== null) {
+      const bonusPos = stepOne(newEvaderPos, bonusDir, baseBlocked, gridType)
+      if (bonusPos.q !== newEvaderPos.q || bonusPos.r !== newEvaderPos.r) {
+        evaderPath.push(bonusPos)
+        newEvaderPos = bonusPos
+        evaderBonusUsed = true
+      }
+    }
+  }
+
+  const resolution: ResolutionSummary = {
+    chaserPredQuality: qualityFromMatches(chaserPredMatches, moveSteps, predictionTarget),
+    evaderPredQuality: qualityFromMatches(evaderPredMatches, moveSteps, predictionTarget),
+    chaserCancelledSteps,
+    evaderCancelledSteps,
+    chaserBonusUsed,
+    evaderBonusUsed,
+  }
+
+  return buildNextState(state, newChaserPos, newEvaderPos, chaserPath, evaderPath, resolution)
+}
+
 function buildNextState(
   state: GameState,
   newChaserPos: HexCoord,
@@ -415,20 +483,62 @@ function buildNextState(
   resolution: ResolutionSummary,
 ): GameState {
   const { chaserPos, evaderPos, turn, settings } = state
-  const chaserCatches = cellDistance(newChaserPos.q, newChaserPos.r, newEvaderPos.q, newEvaderPos.r, settings.gridType) <= 1
+
+  // Always check for same-cell collision during movement (simultaneous step-by-step)
+  let finalChaserPos = newChaserPos
+  let finalEvaderPos = newEvaderPos
+  let finalChaserPath = chaserPath
+  let finalEvaderPath = evaderPath
+
+  const midCollision = findMidCollision(chaserPos, evaderPos, chaserPath, evaderPath, settings.gridType)
+  if (midCollision !== null) {
+    finalChaserPos = midCollision.chaserPos
+    finalEvaderPos = midCollision.evaderPos
+    finalChaserPath = chaserPath.slice(0, midCollision.step)
+    finalEvaderPath = evaderPath.slice(0, midCollision.step)
+  }
+
+  // End-of-turn adjacency check always applies
+  const chaserCatches = cellDistance(finalChaserPos.q, finalChaserPos.r, finalEvaderPos.q, finalEvaderPos.r, settings.gridType) <= 1
   const evaderSurvives = !chaserCatches && turn >= MAX_TURNS
   const winner = chaserCatches ? 'chaser' : evaderSurvives ? 'evader' : null
 
   return {
     ...state,
-    chaserPos: newChaserPos,
-    evaderPos: newEvaderPos,
-    prevChaserPath: chaserPath.length > 0 ? [chaserPos, ...chaserPath] : null,
-    prevEvaderPath: evaderPath.length > 0 ? [evaderPos, ...evaderPath] : null,
+    chaserPos: finalChaserPos,
+    evaderPos: finalEvaderPos,
+    prevChaserPath: finalChaserPath.length > 0 ? [chaserPos, ...finalChaserPath] : null,
+    prevEvaderPath: finalEvaderPath.length > 0 ? [evaderPos, ...finalEvaderPath] : null,
     turn: turn + 1,
     winner,
     p1Plan: null,
     p2Plan: null,
     lastResolution: resolution,
   }
+}
+
+/**
+ * Steps both paths simultaneously and returns the first step where players occupy the same cell,
+ * or null if no collision occurs. Players hold their last position once their path is exhausted.
+ */
+function findMidCollision(
+  chaserStart: HexCoord,
+  evaderStart: HexCoord,
+  chaserPath: HexCoord[],
+  evaderPath: HexCoord[],
+  gridType: 'hex' | 'square',
+): { step: number; chaserPos: HexCoord; evaderPos: HexCoord } | null {
+  const totalSteps = Math.max(chaserPath.length, evaderPath.length)
+  let cp = chaserStart
+  let ep = evaderStart
+
+  for (let i = 0; i < totalSteps; i++) {
+    cp = chaserPath[i] ?? cp
+    ep = evaderPath[i] ?? ep
+    if (cellDistance(cp.q, cp.r, ep.q, ep.r, gridType) === 0) {
+      return { step: i + 1, chaserPos: cp, evaderPos: ep }
+    }
+  }
+
+  return null
 }

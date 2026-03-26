@@ -21,7 +21,9 @@ export function isDraftComplete(draft: DraftPlan, settings: GameSettings, isChas
   const useStep2 = settings.moveSteps === 2 && settings.predictionTarget !== 'destination'
   if (!draft.moveStep1 || !draft.predictStep1) return false
   if (useStep2 && (!draft.moveStep2 || !draft.predictStep2)) return false
-  if (!isChaser && settings.predictionOutcome === 'asymmetric' && !draft.bonusMove) return false
+  const needsBonus = settings.predictionOutcome === 'bonus-both'
+    || (settings.predictionOutcome === 'freeze-and-bonus' && !isChaser)
+  if (needsBonus && !draft.bonusMove) return false
   return true
 }
 
@@ -33,7 +35,9 @@ export function draftToTurnPlan(draft: DraftPlan, settings: GameSettings, isChas
     ...(useStep2 && draft.moveStep2 ? { moveStep2: draft.moveStep2 } : {}),
     predictStep1: draft.predictStep1!,
     ...(useStep2 && draft.predictStep2 ? { predictStep2: draft.predictStep2 } : {}),
-    ...(!isChaser && settings.predictionOutcome === 'asymmetric' && draft.bonusMove
+    ...(( settings.predictionOutcome === 'bonus-both'
+         || (settings.predictionOutcome === 'freeze-and-bonus' && !isChaser)
+       ) && draft.bonusMove
       ? { bonusMove: draft.bonusMove }
       : {}),
   }
@@ -65,11 +69,44 @@ interface ResolutionBannerProps {
   settings: GameSettings
 }
 
+function myPredOutcomeText(
+  resolution: ResolutionSummary,
+  isChaser: boolean,
+  settings: GameSettings,
+  oppCancelled: [boolean, boolean],
+): string {
+  const { predictionOutcome } = settings
+  if (predictionOutcome === 'bonus-both') {
+    const bonusUsed = isChaser ? resolution.chaserBonusUsed : resolution.evaderBonusUsed
+    return bonusUsed ? 'Bonus move triggered' : 'Bonus move blocked'
+  }
+  if (predictionOutcome === 'freeze-and-bonus' && !isChaser) {
+    return resolution.evaderBonusUsed ? 'Bonus move triggered' : 'Bonus move blocked'
+  }
+  return cancelledDesc(oppCancelled, settings)
+}
+
+function oppPredOutcomeText(
+  resolution: ResolutionSummary,
+  isChaser: boolean,
+  settings: GameSettings,
+  myCancelled: [boolean, boolean],
+): string {
+  const { predictionOutcome } = settings
+  if (predictionOutcome === 'bonus-both') {
+    const bonusUsed = isChaser ? resolution.evaderBonusUsed : resolution.chaserBonusUsed
+    return bonusUsed ? 'Opponent used bonus move' : 'Opponent bonus blocked'
+  }
+  if (predictionOutcome === 'freeze-and-bonus' && isChaser) {
+    return resolution.evaderBonusUsed ? 'Evader used bonus move' : 'Evader bonus blocked'
+  }
+  return cancelledDesc(myCancelled, settings)
+}
+
 function ResolutionBanner({ resolution, isChaser, settings }: ResolutionBannerProps) {
   const {
     chaserPredQuality, evaderPredQuality,
     chaserCancelledSteps, evaderCancelledSteps,
-    evaderBonusUsed,
   } = resolution
 
   const myPredQuality  = isChaser ? chaserPredQuality  : evaderPredQuality
@@ -79,8 +116,6 @@ function ResolutionBanner({ resolution, isChaser, settings }: ResolutionBannerPr
 
   const myLabel  = qualityLabel(myPredQuality)
   const oppLabel = qualityLabel(oppPredQuality)
-
-  const isAsymmetric = settings.predictionOutcome === 'asymmetric'
 
   return (
     <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-3 text-xs flex flex-col gap-2">
@@ -94,10 +129,7 @@ function ResolutionBanner({ resolution, isChaser, settings }: ResolutionBannerPr
         </div>
         {myPredQuality !== 'none' && (
           <p className="text-neutral-400 text-right">
-            {isAsymmetric && !isChaser
-              ? evaderBonusUsed ? 'Bonus move triggered' : 'Bonus move blocked'
-              : cancelledDesc(oppCancelled, settings)
-            }
+            {myPredOutcomeText(resolution, isChaser, settings, oppCancelled)}
           </p>
         )}
       </div>
@@ -110,10 +142,7 @@ function ResolutionBanner({ resolution, isChaser, settings }: ResolutionBannerPr
         </div>
         {oppPredQuality !== 'none' && (
           <p className="text-neutral-400 text-right">
-            {isAsymmetric && isChaser
-              ? evaderBonusUsed ? 'Evader used bonus move' : 'Evader bonus blocked'
-              : cancelledDesc(myCancelled, settings)
-            }
+            {oppPredOutcomeText(resolution, isChaser, settings, myCancelled)}
           </p>
         )}
       </div>
@@ -183,7 +212,9 @@ function buildSteps(
     steps.push({ label: 'Predict opp step 2', done: !!draft.predictStep2, active: planningPhase === 'predict_step2' })
   }
 
-  if (!isChaser && settings.predictionOutcome === 'asymmetric') {
+  const needsBonus = settings.predictionOutcome === 'bonus-both'
+    || (settings.predictionOutcome === 'freeze-and-bonus' && !isChaser)
+  if (needsBonus) {
     steps.push({ label: 'Bonus move (if prediction hits)', done: !!draft.bonusMove, active: planningPhase === 'bonus_move' })
   }
 

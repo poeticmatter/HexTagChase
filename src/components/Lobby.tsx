@@ -113,11 +113,12 @@ function SettingsScreen({ settings, onChange, onStart, onBack }: SettingsScreenP
           />
           <SettingRow
             label="Prediction outcome"
-            description="Symmetric: correct prediction freezes opponent. Asymmetric: Chaser freezes Evader as usual, but Evader's correct prediction unlocks a pre-committed bonus move instead."
+            description="Freeze both: correct prediction freezes the opponent. Bonus both: correct prediction unlocks your own pre-committed bonus move. Freeze & bonus: chaser freezes evader, evader's correct prediction unlocks a bonus move instead."
             value={settings.predictionOutcome}
             options={[
-              { label: 'Symmetric', value: 'symmetric' },
-              { label: 'Asymmetric', value: 'asymmetric' },
+              { label: 'Freeze both', value: 'freeze-both' },
+              { label: 'Bonus both', value: 'bonus-both' },
+              { label: 'Freeze & bonus', value: 'freeze-and-bonus' },
             ]}
             onChange={v => set('predictionOutcome', v)}
           />

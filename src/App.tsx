@@ -66,7 +66,9 @@ function nextPhase(draft: DraftPlan, settings: GameSettings, isChaser: boolean):
   if (useStep2 && !draft.moveStep2) return 'move_step2'
   if (!draft.predictStep1) return 'predict_step1'
   if (useStep2 && !draft.predictStep2) return 'predict_step2'
-  if (!isChaser && settings.predictionOutcome === 'asymmetric' && !draft.bonusMove) return 'bonus_move'
+  const needsBonus = settings.predictionOutcome === 'bonus-both'
+    || (settings.predictionOutcome === 'freeze-and-bonus' && !isChaser)
+  if (needsBonus && !draft.bonusMove) return 'bonus_move'
   return 'ready'
 }
 

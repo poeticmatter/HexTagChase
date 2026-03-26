@@ -54,28 +54,14 @@ function getValidTargets(
 
   switch (phase) {
     case 'move_step1': {
-      const opponentKey = hexKey(opponentPos)
       if (settings.predictionTarget === 'destination') {
-        // Block opponent so paths through them are excluded
-        const blockedWithOpponent = new Set([...blocked, opponentKey])
-        return new Set(
-          reachableDestinations(myPos, blockedWithOpponent, gridType, settings.moveSteps).map(hexKey)
-        )
+        return new Set(reachableDestinations(myPos, blocked, gridType, settings.moveSteps).map(hexKey))
       }
-      return new Set(
-        validNeighbors(myPos, blocked, gridType)
-          .filter(h => hexKey(h) !== opponentKey)
-          .map(hexKey)
-      )
+      return new Set(validNeighbors(myPos, blocked, gridType).map(hexKey))
     }
     case 'move_step2': {
       if (!draft.moveStep1) return new Set()
-      const opponentKey = hexKey(opponentPos)
-      return new Set(
-        validNeighbors(draft.moveStep1, blocked, gridType)
-          .filter(h => hexKey(h) !== opponentKey)
-          .map(hexKey)
-      )
+      return new Set(validNeighbors(draft.moveStep1, blocked, gridType).map(hexKey))
     }
     case 'predict_step1': {
       if (settings.predictionTarget === 'destination') {
@@ -88,15 +74,10 @@ function getValidTargets(
       return new Set(validNeighbors(draft.predictStep1, blocked, gridType).map(hexKey))
     }
     case 'bonus_move': {
-      // Planned from the evader's expected final position after regular moves
+      // Planned from the player's expected final position after regular moves
       const finalPlanPos = draft.moveStep2 ?? draft.moveStep1
       if (!finalPlanPos) return new Set()
-      const opponentKey = hexKey(opponentPos)
-      return new Set(
-        validNeighbors(finalPlanPos, blocked, gridType)
-          .filter(h => hexKey(h) !== opponentKey)
-          .map(hexKey)
-      )
+      return new Set(validNeighbors(finalPlanPos, blocked, gridType).map(hexKey))
     }
     case 'ready':
       return new Set()
