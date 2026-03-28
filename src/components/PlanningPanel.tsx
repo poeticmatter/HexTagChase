@@ -1,5 +1,5 @@
 import type { HexCoord, TurnPlan, ResolutionSummary, PredictionQuality, GameSettings } from '../types'
-import { MAX_TURNS } from '../lib/hexGameLogic'
+import { MAX_TURNS, TOKENS_NEEDED } from '../lib/hexGameLogic'
 
 export type PlanningPhase =
   | 'move_step1'
@@ -231,6 +231,7 @@ interface Props {
   lastResolution: ResolutionSummary | null
   waitingForPartner: boolean
   settings: GameSettings
+  tokensCollected: number
   onConfirm: (plan: TurnPlan) => void
   onReset: () => void
 }
@@ -243,6 +244,7 @@ export function PlanningPanel({
   lastResolution,
   waitingForPartner,
   settings,
+  tokensCollected,
   onConfirm,
   onReset,
 }: Props) {
@@ -251,7 +253,9 @@ export function PlanningPanel({
   const roleColor = isChaser ? 'text-red-400' : 'text-blue-400'
   const goal = isChaser
     ? 'Tag the evader (end adjacent)'
-    : `Survive ${MAX_TURNS} turns`
+    : settings.evaderObjective === 'collect'
+      ? `Collect tokens (${tokensCollected} / ${TOKENS_NEEDED})`
+      : `Survive ${MAX_TURNS} turns`
 
   const isComplete = isDraftComplete(draft, settings, isChaser)
 

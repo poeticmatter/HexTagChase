@@ -5,6 +5,19 @@ import {
 } from './hexGrid'
 
 export const MAX_TURNS = 20
+export const TOKENS_NEEDED = 4
+
+// ── Collectible token positions ─────────────────────────────────────────────
+// Fixed positions closer to the chaser spawn (-3,0) than the evader spawn (3,0).
+// Spread across the chaser's half so the chaser faces a defender-vs-pursuer dilemma.
+export const COLLECTIBLE_TOKENS: HexCoord[] = [
+  { q: -4, r:  1 },  // far-left edge
+  { q: -2, r: -2 },  // upper-left zone
+  { q: -1, r: -3 },  // upper zone, off-center
+  { q: -3, r:  4 },  // lower-left corner
+  { q: -2, r:  2 },  // lower-left center
+  { q: -1, r: -1 },  // center-left
+]
 
 // ── Starting positions ─────────────────────────────────────────────────────
 
@@ -482,7 +495,7 @@ function buildNextState(
   evaderPath: HexCoord[],
   resolution: ResolutionSummary,
 ): GameState {
-  const { chaserPos, evaderPos, turn, settings } = state
+  const { chaserPos, evaderPos, turn, settings, collectibleTokens, tokensCollected } = state
 
   // Always check for same-cell collision during movement (simultaneous step-by-step)
   let finalChaserPos = newChaserPos
@@ -500,8 +513,23 @@ function buildNextState(
 
   // End-of-turn adjacency check always applies
   const chaserCatches = cellDistance(finalChaserPos.q, finalChaserPos.r, finalEvaderPos.q, finalEvaderPos.r, settings.gridType) <= 1
-  const evaderSurvives = !chaserCatches && turn >= MAX_TURNS
-  const winner = chaserCatches ? 'chaser' : evaderSurvives ? 'evader' : null
+
+  // Token collection: evader picks up a token at their final position (only if not caught)
+  let nextTokens = collectibleTokens
+  let nextTokensCollected = tokensCollected
+  if (!chaserCatches && settings.evaderObjective === 'collect') {
+    const evaderKey = `${finalEvaderPos.q},${finalEvaderPos.r}`
+    const tokenIndex = collectibleTokens.findIndex(t => `${t.q},${t.r}` === evaderKey)
+    if (tokenIndex !== -1) {
+      nextTokens = collectibleTokens.filter((_, i) => i !== tokenIndex)
+      nextTokensCollected = tokensCollected + 1
+    }
+  }
+
+  // Win condition
+  const evaderCollected = settings.evaderObjective === 'collect' && nextTokensCollected >= TOKENS_NEEDED
+  const evaderSurvived = settings.evaderObjective === 'survive' && !chaserCatches && turn >= MAX_TURNS
+  const winner = chaserCatches ? 'chaser' : (evaderCollected || evaderSurvived) ? 'evader' : null
 
   return {
     ...state,
@@ -514,6 +542,8 @@ function buildNextState(
     p1Plan: null,
     p2Plan: null,
     lastResolution: resolution,
+    collectibleTokens: nextTokens,
+    tokensCollected: nextTokensCollected,
   }
 }
 

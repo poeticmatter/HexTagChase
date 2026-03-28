@@ -122,6 +122,16 @@ function SettingsScreen({ settings, onChange, onStart, onBack }: SettingsScreenP
             ]}
             onChange={v => set('predictionOutcome', v)}
           />
+          <SettingRow
+            label="Evader objective"
+            description="Survive: evader wins by lasting 20 turns. Collect: evader wins by collecting 4 of 6 tokens scattered near the chaser's start — tokens are fixed each game."
+            value={settings.evaderObjective}
+            options={[
+              { label: 'Survive', value: 'survive' },
+              { label: 'Collect', value: 'collect' },
+            ]}
+            onChange={v => set('evaderObjective', v)}
+          />
         </div>
 
         <div className="flex flex-col gap-2">

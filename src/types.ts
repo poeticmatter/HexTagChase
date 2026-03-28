@@ -13,6 +13,8 @@ export interface GameSettings {
   predictionTarget: 'direction' | 'destination'
   /** freeze-both: correct prediction freezes opponent. bonus-both: correct prediction unlocks your own bonus move. freeze-and-bonus: chaser freezes evader, evader unlocks bonus move. */
   predictionOutcome: 'freeze-both' | 'bonus-both' | 'freeze-and-bonus'
+  /** survive: evader wins by lasting MAX_TURNS. collect: evader wins by collecting 4 of 6 fixed tokens. */
+  evaderObjective: 'survive' | 'collect'
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   moveSteps: 2,
   predictionTarget: 'direction',
   predictionOutcome: 'freeze-both',
+  evaderObjective: 'survive',
 }
 
 /** A submitted plan for one turn. */
@@ -53,6 +56,8 @@ export interface GameState {
   p2Plan: TurnPlan | null   // p2 = evader
   lastResolution: ResolutionSummary | null
   settings: GameSettings
+  collectibleTokens: HexCoord[]  // remaining uncollected tokens (empty in survive mode)
+  tokensCollected: number         // how many tokens the evader has collected
 }
 
 export type ConnectionStatus =

@@ -5,7 +5,7 @@ import { PlanningPanel } from './components/PlanningPanel'
 import type { DraftPlan, PlanningPhase } from './components/PlanningPanel'
 import { Lobby } from './components/Lobby'
 import type { HexCoord, TurnPlan, GameSettings } from './types'
-import { MAX_TURNS } from './lib/hexGameLogic'
+import { MAX_TURNS, TOKENS_NEEDED } from './lib/hexGameLogic'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -142,9 +142,15 @@ function GameView({
       {/* Header */}
       <div className="flex items-center gap-4 flex-wrap justify-center">
         <h1 className="text-2xl font-bold tracking-tight">Hex Tag</h1>
-        <span className="text-neutral-500 text-sm">
-          Turn {Math.min(gameState.turn, MAX_TURNS)} / {MAX_TURNS}
-        </span>
+        {settings.evaderObjective === 'collect' ? (
+          <span className="text-neutral-500 text-sm">
+            Tokens {gameState.tokensCollected} / {TOKENS_NEEDED}
+          </span>
+        ) : (
+          <span className="text-neutral-500 text-sm">
+            Turn {Math.min(gameState.turn, MAX_TURNS)} / {MAX_TURNS}
+          </span>
+        )}
         <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
           isChaser
             ? 'bg-red-900/50 text-red-400 border-red-800'
@@ -161,6 +167,7 @@ function GameView({
         prevOpponentPath={prevOpponentPath}
         isChaser={isChaser}
         obstacles={gameState.obstacles}
+        collectibleTokens={gameState.collectibleTokens}
         planningPhase={planningPhase}
         draft={draft}
         waitingForPartner={waitingForPartner}
@@ -191,6 +198,7 @@ function GameView({
             lastResolution={gameState.lastResolution}
             waitingForPartner={waitingForPartner}
             settings={settings}
+            tokensCollected={gameState.tokensCollected}
             onConfirm={handleConfirm}
             onReset={handleReset}
           />

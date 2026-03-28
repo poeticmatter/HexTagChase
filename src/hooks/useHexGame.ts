@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, GameSettings } from '../types'
 import { DEFAULT_SETTINGS } from '../types'
-import { getInitialPositions, generateObstacles, resolveRound } from '../lib/hexGameLogic'
+import { getInitialPositions, generateObstacles, resolveRound, COLLECTIBLE_TOKENS } from '../lib/hexGameLogic'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
@@ -23,6 +23,8 @@ function buildInitialState(settings: GameSettings): GameState {
     p2Plan: null,
     lastResolution: null,
     settings,
+    collectibleTokens: settings.evaderObjective === 'collect' ? [...COLLECTIBLE_TOKENS] : [],
+    tokensCollected: 0,
   }
 }
 

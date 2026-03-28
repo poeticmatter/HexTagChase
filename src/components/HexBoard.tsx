@@ -108,6 +108,7 @@ interface Props {
   prevOpponentPath: HexCoord[] | null
   isChaser: boolean
   obstacles: HexCoord[]
+  collectibleTokens: HexCoord[]
   planningPhase: PlanningPhase
   draft: DraftPlan
   waitingForPartner: boolean
@@ -123,6 +124,7 @@ export function HexBoard({
   prevOpponentPath,
   isChaser,
   obstacles,
+  collectibleTokens,
   planningPhase,
   draft,
   waitingForPartner,
@@ -207,6 +209,30 @@ export function HexBoard({
               strokeOpacity={isValid ? 0.9 : 1}
               style={{ cursor: isValid ? 'pointer' : 'default' }}
               onClick={() => isValid && onHexClick({ q, r })}
+            />
+          )
+        })}
+
+        {/* Collectible tokens */}
+        {collectibleTokens.map(({ q, r }) => {
+          const { x, y } = cellToPixel(q, r, settings)
+          const cx = x + offsetX
+          const cy = y + offsetY
+          const s = settings.gridType === 'square' ? SQUARE_SIZE * 0.22 : HEX_SIZE * 0.26
+          return (
+            <polygon
+              key={`token-${q},${r}`}
+              points={[
+                [cx,     cy - s * 1.4],
+                [cx + s, cy          ],
+                [cx,     cy + s * 1.4],
+                [cx - s, cy          ],
+              ].map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(' ')}
+              fill="#f59e0b"
+              stroke="#fbbf24"
+              strokeWidth={1}
+              opacity={0.9}
+              style={{ pointerEvents: 'none' }}
             />
           )
         })}
