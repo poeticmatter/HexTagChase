@@ -531,7 +531,7 @@ function buildNextState(
 
   // Win condition
   const evaderCollected = settings.evaderObjective === 'collect' && nextTokensCollected >= TOKENS_NEEDED
-  const evaderSurvived = settings.evaderObjective === 'survive' && !chaserCatches && turn >= MAX_TURNS
+  const evaderSurvived = settings.evaderObjective === 'survive' && !chaserCatches && turn >= settings.maxTurns
   const winner = chaserCatches ? 'chaser' : (evaderCollected || evaderSurvived) ? 'evader' : null
 
   return {

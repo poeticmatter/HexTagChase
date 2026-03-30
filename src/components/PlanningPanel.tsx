@@ -1,5 +1,5 @@
 import type { HexCoord, TurnPlan, ResolutionSummary, PredictionQuality, GameSettings } from '../types'
-import { MAX_TURNS, TOKENS_NEEDED } from '../lib/hexGameLogic'
+import { TOKENS_NEEDED } from '../lib/hexGameLogic'
 
 export type PlanningPhase =
   | 'move_step1'
@@ -255,7 +255,7 @@ export function PlanningPanel({
     ? 'Tag the evader (end adjacent)'
     : settings.evaderObjective === 'collect'
       ? `Collect tokens (${tokensCollected} / ${TOKENS_NEEDED})`
-      : `Survive ${MAX_TURNS} turns`
+      : `Survive ${settings.maxTurns} turns`
 
   const isComplete = isDraftComplete(draft, settings, isChaser)
 

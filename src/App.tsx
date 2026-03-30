@@ -5,7 +5,7 @@ import { PlanningPanel } from './components/PlanningPanel'
 import type { DraftPlan, PlanningPhase } from './components/PlanningPanel'
 import { Lobby } from './components/Lobby'
 import type { HexCoord, TurnPlan, GameSettings } from './types'
-import { MAX_TURNS, TOKENS_NEEDED } from './lib/hexGameLogic'
+import { TOKENS_NEEDED } from './lib/hexGameLogic'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -101,7 +101,8 @@ function GameView({
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
 
-  const isChaser = playerRole === 1
+  const hostRole = gameState?.settings.hostRole ?? hostSettings?.hostRole ?? 'chaser'
+  const isChaser = (hostRole === 'chaser') === (playerRole === 1)
 
   const handleHexClick = useCallback((hex: HexCoord) => {
     setDraft(prev => {
@@ -131,25 +132,25 @@ function GameView({
   if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
   if (!gameState)                       return <StatusScreen message="Loading…" />
 
-  const settings        = gameState.settings
+  const gameSettings    = gameState.settings
   const myPos           = isChaser ? gameState.chaserPos    : gameState.evaderPos
   const opponentPos     = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath      = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
-  const planningPhase   = nextPhase(draft, settings, isChaser)
+  const planningPhase   = nextPhase(draft, gameSettings, isChaser)
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
       {/* Header */}
       <div className="flex items-center gap-4 flex-wrap justify-center">
         <h1 className="text-2xl font-bold tracking-tight">Hex Tag</h1>
-        {settings.evaderObjective === 'collect' ? (
+        {gameSettings.evaderObjective === 'collect' ? (
           <span className="text-neutral-500 text-sm">
             Tokens {gameState.tokensCollected} / {TOKENS_NEEDED}
           </span>
         ) : (
           <span className="text-neutral-500 text-sm">
-            Turn {Math.min(gameState.turn, MAX_TURNS)} / {MAX_TURNS}
+            Turn {Math.min(gameState.turn, gameSettings.maxTurns)} / {gameSettings.maxTurns}
           </span>
         )}
         <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
@@ -184,7 +185,7 @@ function GameView({
         draft={draft}
         waitingForPartner={waitingForPartner}
         winner={gameState.winner}
-        settings={settings}
+        settings={gameSettings}
         onHexClick={handleHexClick}
       />
 
@@ -209,7 +210,7 @@ function GameView({
             planningPhase={planningPhase}
             lastResolution={gameState.lastResolution}
             waitingForPartner={waitingForPartner}
-            settings={settings}
+            settings={gameSettings}
             tokensCollected={gameState.tokensCollected}
             onConfirm={handleConfirm}
             onReset={handleReset}

@@ -34,28 +34,6 @@ function SegmentedToggle<T extends string>({ value, options, onChange }: ToggleP
   )
 }
 
-// ── Individual setting row ────────────────────────────────────────────────
-
-interface SettingRowProps<T extends string> {
-  label: string
-  description: string
-  value: T
-  options: { label: string; value: T }[]
-  onChange: (v: T) => void
-}
-
-function SettingRow<T extends string>({ label, description, value, options, onChange }: SettingRowProps<T>) {
-  return (
-    <div className="flex flex-col gap-1.5 py-3 border-b border-neutral-800 last:border-0">
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-sm font-medium text-neutral-200">{label}</span>
-        <SegmentedToggle value={value} options={options} onChange={onChange} />
-      </div>
-      <p className="text-xs text-neutral-500 leading-relaxed">{description}</p>
-    </div>
-  )
-}
-
 // ── Settings screen ───────────────────────────────────────────────────────
 
 interface SettingsScreenProps {
@@ -81,57 +59,51 @@ function SettingsScreen({ settings, onChange, onStart, onBack }: SettingsScreenP
         </div>
 
         <div className="rounded-xl border border-neutral-700 bg-neutral-800/30 px-4">
-          <SettingRow
-            label="Grid type"
-            description="Hex uses 6 directional movement. Square uses 4 cardinal directions. Square may be more readable; hex has richer directional space."
-            value={settings.gridType}
-            options={[
-              { label: 'Hex', value: 'hex' },
-              { label: 'Square', value: 'square' },
-            ]}
-            onChange={v => set('gridType', v)}
-          />
-          <SettingRow
-            label="Steps per turn"
-            description="2-step turns mean planning and predicting two moves each. 1-step is simpler — test whether the 2-step dynamic creates the interesting play."
-            value={String(settings.moveSteps) as '1' | '2'}
-            options={[
-              { label: '2 steps', value: '2' },
-              { label: '1 step', value: '1' },
-            ]}
-            onChange={v => set('moveSteps', Number(v) as 1 | 2)}
-          />
-          <SettingRow
-            label="Prediction mode"
-            description="Direction: predict which way your opponent moves. Destination: predict exact arrival hex. Destination can be easier in corridors — two paths can share a destination."
-            value={settings.predictionTarget}
-            options={[
-              { label: 'Direction', value: 'direction' },
-              { label: 'Destination', value: 'destination' },
-            ]}
-            onChange={v => set('predictionTarget', v)}
-          />
-          <SettingRow
-            label="Prediction outcome"
-            description="Freeze both: correct prediction freezes the opponent. Bonus both: correct prediction unlocks your own pre-committed bonus move. Freeze & bonus: chaser freezes evader, evader's correct prediction unlocks a bonus move instead."
-            value={settings.predictionOutcome}
-            options={[
-              { label: 'Freeze both', value: 'freeze-both' },
-              { label: 'Bonus both', value: 'bonus-both' },
-              { label: 'Freeze & bonus', value: 'freeze-and-bonus' },
-            ]}
-            onChange={v => set('predictionOutcome', v)}
-          />
-          <SettingRow
-            label="Evader objective"
-            description="Survive: evader wins by lasting 20 turns. Collect: evader wins by collecting 4 of 6 tokens scattered near the chaser's start — tokens are fixed each game."
-            value={settings.evaderObjective}
-            options={[
-              { label: 'Survive', value: 'survive' },
-              { label: 'Collect', value: 'collect' },
-            ]}
-            onChange={v => set('evaderObjective', v)}
-          />
+          {/* Role */}
+          <div className="flex flex-col gap-1.5 py-3 border-b border-neutral-800">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-neutral-200">Your role</span>
+              <SegmentedToggle
+                value={settings.hostRole}
+                options={[
+                  { label: 'Chaser', value: 'chaser' },
+                  { label: 'Evader', value: 'evader' },
+                ]}
+                onChange={v => set('hostRole', v)}
+              />
+            </div>
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              {settings.hostRole === 'chaser'
+                ? 'You pursue the evader. Tag them to win.'
+                : 'You evade the chaser. Survive long enough to win.'}
+            </p>
+          </div>
+
+          {/* Turns to survive */}
+          <div className="flex flex-col gap-2 py-3">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-neutral-200">Turns to survive</span>
+              <span className="text-sm font-bold text-blue-400 tabular-nums w-6 text-right">
+                {settings.maxTurns}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={20}
+              step={1}
+              value={settings.maxTurns}
+              onChange={e => set('maxTurns', Number(e.target.value))}
+              className="w-full accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-neutral-600">
+              <span>10</span>
+              <span>20</span>
+            </div>
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              Evader wins by surviving this many turns without being tagged.
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">
