@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from 'react'
 import { useHexGame } from './hooks/useHexGame'
 import { HexBoard } from './components/HexBoard'
 import { PlanningPanel } from './components/PlanningPanel'
-import type { DraftPlan, PlanningPhase } from './components/PlanningPanel'
+import type { DraftPlan } from './components/PlanningPanel'
+import type { TurnSchema, UIStep } from './types'
 import { Lobby } from './components/Lobby'
 import type { HexCoord, TurnPlan } from './types'
 import { MAX_TURNS, HOST_ROLE } from './types'
@@ -53,25 +54,39 @@ function WaitingForPartner({ roomCode }: { roomCode: string }) {
 // ── Planning state helpers ────────────────────────────────────────────────────
 
 const EMPTY_DRAFT: DraftPlan = {
-  moveDest: null,
+  declaration: null,
+  moveDest1: null,
+  moveDest2: null,
   predictDest: null,
   bonusMove: null,
+  reactionExecute: null,
+  idleConfirmed: null,
 }
 
-function nextPhase(draft: DraftPlan): PlanningPhase {
-  if (!draft.moveDest) return 'move_dest'
-  if (!draft.predictDest) return 'predict_dest'
-  if (!draft.bonusMove) return 'bonus_move'
+function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' {
+  for (const step of schema.requiredSteps) {
+    if (step === 'select_declaration' && !draft.declaration) return step
+    if (step === 'select_movement_1' && !draft.moveDest1) return step
+    if (step === 'select_movement_2' && !draft.moveDest2) return step
+    if (step === 'select_prediction' && !draft.predictDest) return step
+    if (step === 'select_bonus' && !draft.bonusMove) return step
+    if (step === 'select_reaction' && draft.reactionExecute === null) return step
+    if (step === 'idle_confirmation' && !draft.idleConfirmed) return step
+  }
   return 'ready'
 }
 
-function applyClick(draft: DraftPlan, hex: HexCoord): DraftPlan {
-  const phase = nextPhase(draft)
-  switch (phase) {
-    case 'move_dest':    return { ...draft, moveDest: hex }
-    case 'predict_dest': return { ...draft, predictDest: hex }
-    case 'bonus_move':   return { ...draft, bonusMove: hex }
-    case 'ready':        return draft
+function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema): DraftPlan {
+  const step = getCurrentStep(draft, schema)
+  switch (step) {
+    case 'select_declaration': return { ...draft, declaration: hex }
+    case 'select_movement_1':  return { ...draft, moveDest1: hex }
+    case 'select_movement_2':  return { ...draft, moveDest2: hex }
+    case 'select_prediction':  return { ...draft, predictDest: hex }
+    case 'select_bonus':       return { ...draft, bonusMove: hex }
+    case 'select_reaction':    return draft // Handle via buttons, not hex clicks
+    case 'idle_confirmation':  return draft // Handle via buttons
+    case 'ready':              return draft
   }
 }
 
@@ -94,11 +109,12 @@ function GameView({
 
   const handleHexClick = useCallback((hex: HexCoord) => {
     setDraft(prev => {
-      // gameState is guaranteed non-null when the board is interactive
       if (!gameState) return prev
-      return applyClick(prev, hex)
+      const roleKey = isChaser ? 'chaser' : 'evader'
+      const schema = gameState.turnSchema[roleKey]
+      return applyClick(prev, hex, schema)
     })
-  }, [gameState])
+  }, [gameState, isChaser])
 
   const handleConfirm = useCallback((plan: TurnPlan) => {
     submitPlan(plan)
@@ -124,7 +140,9 @@ function GameView({
   const opponentPos      = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
-  const planningPhase    = nextPhase(draft)
+  const roleKey          = isChaser ? 'chaser' : 'evader'
+  const schema           = gameState.turnSchema[roleKey]
+  const currentStep      = getCurrentStep(draft, schema)
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
@@ -162,7 +180,7 @@ function GameView({
         obstacles={gameState.obstacles}
         walls={gameState.walls}
         showCoords={showCoords}
-        planningPhase={planningPhase}
+        currentStep={currentStep}
         draft={draft}
         waitingForPartner={waitingForPartner}
         winner={gameState.winner}
@@ -182,12 +200,14 @@ function GameView({
           </button>
         </div>
       ) : (
-        <div className="w-full max-w-sm" key={gameState.turn}>
+        <div className="w-full max-w-sm" key={`${gameState.turn}-${gameState.phase}`}>
           <PlanningPanel
             isChaser={isChaser}
             turn={gameState.turn}
+            phase={gameState.phase}
+            schema={schema}
+            currentStep={currentStep}
             draft={draft}
-            planningPhase={planningPhase}
             lastResolution={gameState.lastResolution}
             waitingForPartner={waitingForPartner}
             onConfirm={handleConfirm}

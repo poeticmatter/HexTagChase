@@ -369,6 +369,9 @@ export function reachableDestinations(
   return result
 }
 
+import { getPowerStrategy } from './powers/PowerFactory'
+import type { StandardPlan, LinePlan, ReactionPlan, IdlePlan } from '../types'
+
 // ── Movement ──────────────────────────────────────────────────────────────
 
 /**
@@ -376,7 +379,7 @@ export function reachableDestinations(
  * Returns the first unblocked neighbor of start that is also a neighbor of destination,
  * or the destination itself if it is 1 step away.
  */
-function findIntermediateCell(
+export function findIntermediateCell(
   start: HexCoord,
   destination: HexCoord,
   blocked: Set<string>,
@@ -411,7 +414,7 @@ function findIntermediateCell(
  * Destination may be 1 or 2 steps away.
  * Returns the sequence of positions actually visited.
  */
-function executePath(
+export function executePath(
   startPos: HexCoord,
   targetDest: HexCoord,
   blocked: Set<string>,
@@ -434,55 +437,195 @@ function executePath(
 
 // ── Round resolution ───────────────────────────────────────────────────────
 
-export function resolveRound(
+export function processPhase(
+  state: GameState,
+  p1Plan: TurnPlan | null,
+  p2Plan: TurnPlan | null,
+): GameState {
+  const chaserStrat = getPowerStrategy(state.chaserPower)
+  const evaderStrat = getPowerStrategy(state.evaderPower)
+
+  let nextState = { ...state, transientContext: { ...state.transientContext } }
+
+  // Inject default "skip" plans for empty schemas if they weren't provided.
+  // The orchestrator may pass null if the player wasn't required to submit anything.
+  const resolvedP1Plan = p1Plan || { type: 'standard', turn: state.turn, phase: state.phase } as TurnPlan
+  const resolvedP2Plan = p2Plan || { type: 'standard', turn: state.turn, phase: state.phase } as TurnPlan
+
+  if (state.phase === 'declaring') {
+    if (resolvedP1Plan.type === 'declaration') {
+      nextState.transientContext.chaserDeclaration = resolvedP1Plan.declaredDest
+    }
+    if (resolvedP2Plan.type === 'declaration') {
+      nextState.transientContext.evaderDeclaration = resolvedP2Plan.declaredDest
+    }
+    nextState.phase = 'planning'
+
+    const turnSchema: GameState['turnSchema'] = {
+      chaser: { requiredSteps: chaserStrat.getRequiredSteps(nextState.phase) },
+      evader: { requiredSteps: evaderStrat.getRequiredSteps(nextState.phase) },
+    }
+    nextState.turnSchema = turnSchema
+    return nextState
+
+  } else if (state.phase === 'planning') {
+    if (chaserStrat.requiresPhase('reacting') || evaderStrat.requiresPhase('reacting')) {
+      nextState.transientContext.chaserUnmaskedMove = getMoveDestOrNull(resolvedP1Plan)
+      nextState.transientContext.evaderUnmaskedMove = getMoveDestOrNull(resolvedP2Plan)
+
+      nextState.transientContext.chaserPlanningPlan = resolvedP1Plan
+      nextState.transientContext.evaderPlanningPlan = resolvedP2Plan
+
+      nextState.phase = 'reacting'
+
+      const turnSchema: GameState['turnSchema'] = {
+        chaser: { requiredSteps: chaserStrat.getRequiredSteps(nextState.phase) },
+        evader: { requiredSteps: evaderStrat.getRequiredSteps(nextState.phase) },
+      }
+      nextState.turnSchema = turnSchema
+      return nextState
+    } else {
+      return _resolveRound(nextState, resolvedP1Plan, resolvedP2Plan)
+    }
+
+  } else if (state.phase === 'reacting') {
+    const p1PlanningPlan = state.transientContext.chaserPlanningPlan as TurnPlan
+    const p2PlanningPlan = state.transientContext.evaderPlanningPlan as TurnPlan
+
+    nextState.transientContext.chaserReactionPlan = resolvedP1Plan
+    nextState.transientContext.evaderReactionPlan = resolvedP2Plan
+
+    return _resolveRound(nextState, p1PlanningPlan, p2PlanningPlan)
+  }
+
+  return nextState
+}
+
+function getMoveDestOrNull(plan: TurnPlan | null): HexCoord | [HexCoord, HexCoord] | null {
+  if (!plan) return null
+  if (plan.type === 'standard') return (plan as StandardPlan).moveDest
+  if (plan.type === 'line') return (plan as LinePlan).moveDest
+  return null
+}
+
+function _resolveRound(
   state: GameState,
   p1Plan: TurnPlan,
   p2Plan: TurnPlan,
 ): GameState {
-  const { chaserPos, evaderPos, obstacles, walls, turn } = state
+  const { chaserPos, evaderPos, obstacles, walls, turn, chaserPower, evaderPower } = state
   const baseBlocked = obstacleSet(obstacles)
   const baseWalls = buildWallSet(walls)
 
-  const chaserPredHit = p1Plan.predictDest.q === p2Plan.moveDest.q && p1Plan.predictDest.r === p2Plan.moveDest.r
-  const evaderPredHit = p2Plan.predictDest.q === p1Plan.moveDest.q && p2Plan.predictDest.r === p1Plan.moveDest.r
+  const chaserStrat = getPowerStrategy(chaserPower)
+  const evaderStrat = getPowerStrategy(evaderPower)
 
-  // Both paths computed with only obstacles
-  const chaserPath = executePath(chaserPos, p1Plan.moveDest, baseBlocked, baseWalls)
-  const evaderPath = executePath(evaderPos, p2Plan.moveDest, baseBlocked, baseWalls)
+  // 1. Evaluate pre-movement
+  let chaserExecutes = chaserStrat.onBeforeMoveExecution(
+    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan },
+    true
+  )
+  let evaderExecutes = evaderStrat.onBeforeMoveExecution(
+    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan },
+    true
+  )
+
+  // 2. Determine Predictions Hits
+  const getMoveDest = (plan: TurnPlan) => {
+    if (plan.type === 'standard') return (plan as StandardPlan).moveDest
+    if (plan.type === 'line') return (plan as LinePlan).moveDest[0]
+    return null
+  }
+  const getPredDest = (plan: TurnPlan) => {
+    if (plan.type === 'standard') return (plan as StandardPlan).predictDest
+    if (plan.type === 'line') return (plan as LinePlan).predictDest
+    if (plan.type === 'idle') return (plan as IdlePlan).predictDest
+    return null
+  }
+
+  const p1Pred = getPredDest(p1Plan)
+  const p2Move = getMoveDest(p2Plan)
+  const p2Pred = getPredDest(p2Plan)
+  const p1Move = getMoveDest(p1Plan)
+
+  const chaserPredHit = p1Pred && p2Move && p1Pred.q === p2Move.q && p1Pred.r === p2Move.r
+  const evaderPredHit = p2Pred && p1Move && p2Pred.q === p1Move.q && p2Pred.r === p1Move.r
+
+  // 3. Compute Paths via Strategy
+  const defaultChaserPath = chaserExecutes && p1Move
+    ? executePath(chaserPos, p1Move, baseBlocked, baseWalls)
+    : []
+  const defaultEvaderPath = evaderExecutes && p2Move
+    ? executePath(evaderPos, p2Move, baseBlocked, baseWalls)
+    : []
+
+  const chaserPath = chaserStrat.onPathExecution(
+    { state, role: 'chaser', startPos: chaserPos, targetDest: p1Move, blocked: baseBlocked, walls: baseWalls, myPlan: p1Plan, oppPlan: p2Plan },
+    defaultChaserPath
+  )
+  const evaderPath = evaderStrat.onPathExecution(
+    { state, role: 'evader', startPos: evaderPos, targetDest: p2Move, blocked: baseBlocked, walls: baseWalls, myPlan: p2Plan, oppPlan: p1Plan },
+    defaultEvaderPath
+  )
+
   let newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
   let newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
 
-  // Both bonus moves computed simultaneously with only obstacles blocked
+  // 4. Bonus Calculation
+  let chaserBonusAllowed = chaserStrat.onBonusCalculation(
+    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan, predHit: !!chaserPredHit, oppPredHit: !!evaderPredHit },
+    !!chaserPredHit
+  )
+
+  let evaderBonusAllowed = evaderStrat.onBonusCalculation(
+    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan, predHit: !!evaderPredHit, oppPredHit: !!chaserPredHit },
+    !!evaderPredHit
+  )
+
+  // Opponent nullification hooks (e.g. Declarer fulfilling but opponent predicted it)
+  if (chaserStrat.name === 'Declarer' && chaserBonusAllowed && evaderPredHit) {
+    // If the Chaser is Declarer and fulfilled it (chaserBonusAllowed is true)
+    // AND the Evader correctly predicted the Chaser's declared move,
+    // the Evader's bonus is explicitly nullified.
+    evaderBonusAllowed = false
+  }
+
+  if (evaderStrat.name === 'Declarer' && evaderBonusAllowed && chaserPredHit) {
+    chaserBonusAllowed = false
+  }
+
   let chaserBonusUsed = false
-  if (chaserPredHit && p1Plan.bonusMove) {
-    if (hexDistance(newChaserPos.q, newChaserPos.r, p1Plan.bonusMove.q, p1Plan.bonusMove.r) === 1) {
-      if (!baseBlocked.has(`${p1Plan.bonusMove.q},${p1Plan.bonusMove.r}`) && isPassable(newChaserPos, p1Plan.bonusMove, baseWalls)) {
-        chaserPath.push(p1Plan.bonusMove)
-        newChaserPos = p1Plan.bonusMove
+  const p1Bonus = (p1Plan as StandardPlan | LinePlan | IdlePlan).bonusMove
+  if (chaserBonusAllowed && p1Bonus) {
+    if (hexDistance(newChaserPos.q, newChaserPos.r, p1Bonus.q, p1Bonus.r) === 1) {
+      if (!baseBlocked.has(`${p1Bonus.q},${p1Bonus.r}`) && isPassable(newChaserPos, p1Bonus, baseWalls)) {
+        chaserPath.push(p1Bonus)
+        newChaserPos = p1Bonus
         chaserBonusUsed = true
       }
     }
   }
 
   let evaderBonusUsed = false
-  if (evaderPredHit && p2Plan.bonusMove) {
-    if (hexDistance(newEvaderPos.q, newEvaderPos.r, p2Plan.bonusMove.q, p2Plan.bonusMove.r) === 1) {
-      if (!baseBlocked.has(`${p2Plan.bonusMove.q},${p2Plan.bonusMove.r}`) && isPassable(newEvaderPos, p2Plan.bonusMove, baseWalls)) {
-        evaderPath.push(p2Plan.bonusMove)
-        newEvaderPos = p2Plan.bonusMove
+  const p2Bonus = (p2Plan as StandardPlan | LinePlan | IdlePlan).bonusMove
+  if (evaderBonusAllowed && p2Bonus) {
+    if (hexDistance(newEvaderPos.q, newEvaderPos.r, p2Bonus.q, p2Bonus.r) === 1) {
+      if (!baseBlocked.has(`${p2Bonus.q},${p2Bonus.r}`) && isPassable(newEvaderPos, p2Bonus, baseWalls)) {
+        evaderPath.push(p2Bonus)
+        newEvaderPos = p2Bonus
         evaderBonusUsed = true
       }
     }
   }
 
   const resolution: ResolutionSummary = {
-    chaserPredHit,
-    evaderPredHit,
+    chaserPredHit: !!chaserPredHit,
+    evaderPredHit: !!evaderPredHit,
     chaserBonusUsed,
     evaderBonusUsed,
   }
 
-  return buildNextState(state, newChaserPos, newEvaderPos, chaserPath, evaderPath, resolution)
+  return buildNextState(state, newChaserPos, newEvaderPos, chaserPath, evaderPath, resolution, p1Plan, p2Plan)
 }
 
 function buildNextState(
@@ -492,8 +635,12 @@ function buildNextState(
   chaserPath: HexCoord[],
   evaderPath: HexCoord[],
   resolution: ResolutionSummary,
+  p1Plan: TurnPlan,
+  p2Plan: TurnPlan
 ): GameState {
-  const { chaserPos, evaderPos, turn } = state
+  const { chaserPos, evaderPos, turn, chaserPower, evaderPower } = state
+  const chaserStrat = getPowerStrategy(chaserPower)
+  const evaderStrat = getPowerStrategy(evaderPower)
 
   // Always check for same-cell collision during movement (simultaneous step-by-step)
   let finalChaserPos = newChaserPos
@@ -516,6 +663,19 @@ function buildNextState(
   const evaderSurvived = !chaserCatches && turn >= MAX_TURNS
   const winner = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
+  // Process modifiers
+  let modifiers = state.modifiers.filter(m => m.expiresAtTurn > turn)
+  modifiers = modifiers.concat(chaserStrat.onRoundEnd(state, 'chaser', p1Plan))
+  modifiers = modifiers.concat(evaderStrat.onRoundEnd(state, 'evader', p2Plan))
+
+  // Determine the next phase pipeline start
+  // In a new round, we start with declaring, then planning, then reacting.
+  // If no declarer, skip declaring.
+  let nextPhase: GameState['phase'] = 'planning'
+  if (chaserStrat.requiresPhase('declaring') || evaderStrat.requiresPhase('declaring')) {
+    nextPhase = 'declaring'
+  }
+
   return {
     ...state,
     chaserPos: finalChaserPos,
@@ -523,9 +683,12 @@ function buildNextState(
     prevChaserPath: finalChaserPath.length > 0 ? [chaserPos, ...finalChaserPath] : null,
     prevEvaderPath: finalEvaderPath.length > 0 ? [evaderPos, ...finalEvaderPath] : null,
     turn: turn + 1,
+    phase: nextPhase,
     winner,
     p1Plan: null,
     p2Plan: null,
+    modifiers,
+    transientContext: {}, // reset transient state for the next turn
     lastResolution: resolution,
   }
 }

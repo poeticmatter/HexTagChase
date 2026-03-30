@@ -4,7 +4,8 @@ import {
   hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS,
 } from '../lib/hexGrid'
 import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
-import type { PlanningPhase, DraftPlan } from './PlanningPanel'
+import type { DraftPlan } from './PlanningPanel'
+import type { UIStep, TurnSchema, GameState } from '../types'
 
 const HEX_SIZE = 38
 const PADDING  = 30
@@ -67,7 +68,7 @@ function hexWallEdgePoints(
 }
 
 function getValidTargets(
-  phase: PlanningPhase,
+  currentStep: UIStep | 'ready',
   draft: DraftPlan,
   myPos: HexCoord,
   opponentPos: HexCoord,
@@ -76,15 +77,27 @@ function getValidTargets(
 ): Set<string> {
   const blocked = obstacleSet(obstacles)
 
-  switch (phase) {
-    case 'move_dest':
+  switch (currentStep) {
+    case 'select_declaration':
+    case 'select_movement_1':
+      // Technically, we should call onReachableDestinationsRequest, but UI is currently dumb.
+      // We will just use the base reachable logic for now, or you can expand this to use the actual hooks
       return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
-    case 'predict_dest':
-      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
-    case 'bonus_move': {
-      if (!draft.moveDest) return new Set()
-      return new Set(validNeighbors(draft.moveDest, blocked, walls).map(hexKey))
+    case 'select_movement_2': {
+      if (!draft.moveDest1) return new Set()
+      // Line ability's second movement step: from moveDest1
+      return new Set(validNeighbors(draft.moveDest1, blocked, walls).map(hexKey))
     }
+    case 'select_prediction':
+      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
+    case 'select_bonus': {
+      // Bonus move starts from the final destination (moveDest1 or moveDest2)
+      const finalDest = draft.moveDest2 || draft.moveDest1
+      if (!finalDest) return new Set()
+      return new Set(validNeighbors(finalDest, blocked, walls).map(hexKey))
+    }
+    case 'select_reaction':
+    case 'idle_confirmation':
     case 'ready':
       return new Set()
   }
@@ -114,7 +127,7 @@ interface Props {
   isChaser: boolean
   obstacles: HexCoord[]
   walls: WallCoord[]
-  planningPhase: PlanningPhase
+  currentStep: UIStep | 'ready'
   draft: DraftPlan
   waitingForPartner: boolean
   winner: 'chaser' | 'evader' | null
@@ -130,7 +143,7 @@ export function HexBoard({
   isChaser,
   obstacles,
   walls,
-  planningPhase,
+  currentStep,
   draft,
   waitingForPartner,
   winner,
@@ -143,10 +156,12 @@ export function HexBoard({
   const obstacleKeys = obstacleSet(obstacles)
   const wallKeys = buildWallSet(walls)
   const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles, wallKeys)
+    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys)
     : new Set<string>()
 
-  const movePathKeys  = new Set(draft.moveDest ? [hexKey(draft.moveDest)] : [])
+  const movePathKeys  = new Set<string>()
+  if (draft.moveDest1) movePathKeys.add(hexKey(draft.moveDest1))
+  if (draft.moveDest2) movePathKeys.add(hexKey(draft.moveDest2))
   const predPathKeys  = new Set(draft.predictDest ? [hexKey(draft.predictDest)] : [])
   const bonusPathKeys = new Set(draft.bonusMove ? [hexKey(draft.bonusMove)] : [])
 
@@ -248,9 +263,15 @@ export function HexBoard({
           )
         })}
 
-        {/* Move path arrow */}
-        {draft.moveDest && (() => {
-          const { x1, y1, x2, y2 } = pp(myPos, draft.moveDest)
+        {/* Move path arrow(s) */}
+        {draft.moveDest1 && (() => {
+          const { x1, y1, x2, y2 } = pp(myPos, draft.moveDest1)
+          return <line x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
+            markerEnd="url(#arrow-move)" />
+        })()}
+        {draft.moveDest2 && draft.moveDest1 && (() => {
+          const { x1, y1, x2, y2 } = pp(draft.moveDest1, draft.moveDest2)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
             stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
             markerEnd="url(#arrow-move)" />
@@ -266,7 +287,7 @@ export function HexBoard({
 
         {/* Bonus move arrow (green dashed, from planned final pos) */}
         {draft.bonusMove && (() => {
-          const fromPos = draft.moveDest
+          const fromPos = draft.moveDest2 || draft.moveDest1
           if (!fromPos) return null
           const { x1, y1, x2, y2 } = pp(fromPos, draft.bonusMove)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}

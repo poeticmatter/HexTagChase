@@ -1,29 +1,55 @@
 import type { HexCoord, TurnPlan, ResolutionSummary } from '../types'
 import { MAX_TURNS } from '../types'
 
-export type PlanningPhase =
-  | 'move_dest'
-  | 'predict_dest'
-  | 'bonus_move'
-  | 'ready'
+import type { TurnSchema, UIStep } from '../types'
 
 export interface DraftPlan {
-  moveDest: HexCoord | null
+  declaration: HexCoord | null
+  moveDest1: HexCoord | null
+  moveDest2: HexCoord | null
   predictDest: HexCoord | null
   bonusMove: HexCoord | null
+  reactionExecute: boolean | null
+  idleConfirmed: boolean | null
 }
 
-export function isDraftComplete(draft: DraftPlan): boolean {
-  if (!draft.moveDest || !draft.predictDest || !draft.bonusMove) return false
+export function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
+  for (const step of schema.requiredSteps) {
+    if (step === 'select_declaration' && !draft.declaration) return false
+    if (step === 'select_movement_1' && !draft.moveDest1) return false
+    if (step === 'select_movement_2' && !draft.moveDest2) return false
+    if (step === 'select_prediction' && !draft.predictDest) return false
+    if (step === 'select_bonus' && !draft.bonusMove) return false
+    if (step === 'select_reaction' && draft.reactionExecute === null) return false
+    if (step === 'idle_confirmation' && !draft.idleConfirmed) return false
+  }
   return true
 }
 
-export function draftToTurnPlan(draft: DraftPlan): TurnPlan | null {
-  if (!isDraftComplete(draft)) return null
+export function draftToTurnPlan(draft: DraftPlan, schema: TurnSchema, turn: number, phase: any): TurnPlan | null {
+  if (!isDraftComplete(draft, schema)) return null
+
+  // Construct based on schema requirements
+  if (schema.requiredSteps.includes('select_declaration')) {
+    return { type: 'declaration', declaredDest: draft.declaration!, turn, phase }
+  }
+  if (schema.requiredSteps.includes('select_reaction')) {
+    return { type: 'reaction', executeMove: draft.reactionExecute!, turn, phase }
+  }
+  if (schema.requiredSteps.includes('idle_confirmation')) {
+    return { type: 'idle', moveDest: null, predictDest: draft.predictDest!, bonusMove: draft.bonusMove || undefined, turn, phase }
+  }
+  if (schema.requiredSteps.includes('select_movement_2')) {
+    return { type: 'line', moveDest: [draft.moveDest1!, draft.moveDest2!], predictDest: draft.predictDest!, bonusMove: draft.bonusMove || undefined, turn, phase }
+  }
+
   return {
-    moveDest: draft.moveDest!,
+    type: 'standard',
+    moveDest: draft.moveDest1!,
     predictDest: draft.predictDest!,
-    bonusMove: draft.bonusMove!,
+    bonusMove: draft.bonusMove || undefined,
+    turn,
+    phase
   }
 }
 
@@ -85,11 +111,15 @@ function ResolutionBanner({ resolution, isChaser }: ResolutionBannerProps) {
 
 // ── Planning steps display ─────────────────────────────────────────────────
 
-const DEST_PHASE_LABELS: Record<PlanningPhase, string> = {
-  move_dest:    'Click your destination',
-  predict_dest: 'Predict opponent destination',
-  bonus_move:   'Pre-commit bonus move',
-  ready:        'Ready to confirm',
+const DEST_PHASE_LABELS: Record<UIStep | 'ready', string> = {
+  select_declaration: 'Declare your destination',
+  select_movement_1: 'Click your first destination',
+  select_movement_2: 'Click your second destination',
+  select_prediction: 'Predict opponent destination',
+  select_bonus:      'Pre-commit bonus move',
+  select_reaction:   'React to opponent move',
+  idle_confirmation: 'Confirm Idle Action',
+  ready:             'Ready to confirm',
 }
 
 interface StepIndicatorProps {
@@ -117,13 +147,21 @@ function StepIndicator({ label, done, active }: StepIndicatorProps) {
 
 function buildSteps(
   draft: DraftPlan,
-  planningPhase: PlanningPhase,
+  schema: TurnSchema,
+  currentStep: UIStep | 'ready',
 ): { label: string; done: boolean; active: boolean }[] {
-  return [
-    { label: 'Move destination', done: !!draft.moveDest, active: planningPhase === 'move_dest' },
-    { label: 'Predict opp destination', done: !!draft.predictDest, active: planningPhase === 'predict_dest' },
-    { label: 'Bonus move (if hit)', done: !!draft.bonusMove, active: planningPhase === 'bonus_move' },
-  ]
+  return schema.requiredSteps.map(step => {
+    let done = false
+    if (step === 'select_declaration') done = !!draft.declaration
+    if (step === 'select_movement_1') done = !!draft.moveDest1
+    if (step === 'select_movement_2') done = !!draft.moveDest2
+    if (step === 'select_prediction') done = !!draft.predictDest
+    if (step === 'select_bonus') done = !!draft.bonusMove
+    if (step === 'select_reaction') done = draft.reactionExecute !== null
+    if (step === 'idle_confirmation') done = !!draft.idleConfirmed
+
+    return { label: DEST_PHASE_LABELS[step], done, active: currentStep === step }
+  })
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
@@ -131,8 +169,10 @@ function buildSteps(
 interface Props {
   isChaser: boolean
   turn: number
+  phase: any
   draft: DraftPlan
-  planningPhase: PlanningPhase
+  schema: TurnSchema
+  currentStep: UIStep | 'ready'
   lastResolution: ResolutionSummary | null
   waitingForPartner: boolean
   onConfirm: (plan: TurnPlan) => void
@@ -142,21 +182,23 @@ interface Props {
 export function PlanningPanel({
   isChaser,
   turn,
+  phase,
   draft,
-  planningPhase,
+  schema,
+  currentStep,
   lastResolution,
   waitingForPartner,
   onConfirm,
   onReset,
 }: Props) {
-  const steps = buildSteps(draft, planningPhase)
+  const steps = buildSteps(draft, schema, currentStep)
   const role = isChaser ? 'Chaser' : 'Evader'
   const roleColor = isChaser ? 'text-red-400' : 'text-blue-400'
   const goal = isChaser
     ? 'Tag the evader (end adjacent)'
     : `Survive ${MAX_TURNS} turns`
 
-  const isComplete = isDraftComplete(draft)
+  const isComplete = isDraftComplete(draft, schema)
 
   if (waitingForPartner) {
     return (
@@ -183,7 +225,7 @@ export function PlanningPanel({
       {/* Planning steps */}
       <div className="rounded-xl border border-neutral-700 bg-neutral-800/40 p-3 flex flex-col gap-2">
         <p className="text-xs text-neutral-400 font-semibold text-center uppercase tracking-wider mb-1">
-          {DEST_PHASE_LABELS[planningPhase]}
+          {DEST_PHASE_LABELS[currentStep]}
         </p>
         {steps.map(s => (
           <div key={s.label}>
@@ -201,7 +243,7 @@ export function PlanningPanel({
         </button>
         <button
           onClick={() => {
-            const plan = draftToTurnPlan(draft)
+            const plan = draftToTurnPlan(draft, schema, turn, phase)
             if (plan) onConfirm(plan)
           }}
           disabled={!isComplete}

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus } from '../types'
-import { getInitialPositions, generateObstacles, generateWalls, resolveRound } from '../lib/hexGameLogic'
+import { getInitialPositions, generateObstacles, generateWalls, processPhase } from '../lib/hexGameLogic'
+import { getPowerStrategy } from '../lib/powers/PowerFactory'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
@@ -13,16 +14,36 @@ function buildInitialState(): GameState {
   const obstacles = generateObstacles(chaserPos, evaderPos)
   const walls = generateWalls(chaserPos, evaderPos, obstacles)
 
+  const chaserPower = 'Standard' as const
+  const evaderPower = 'Standard' as const
+  const chaserStrat = getPowerStrategy(chaserPower)
+  const evaderStrat = getPowerStrategy(evaderPower)
+
+  let phase: GameState['phase'] = 'planning'
+  if (chaserStrat.requiresPhase('declaring') || evaderStrat.requiresPhase('declaring')) {
+    phase = 'declaring'
+  }
+
+  const turnSchema: GameState['turnSchema'] = {
+    chaser: { requiredSteps: chaserStrat.getRequiredSteps(phase) },
+    evader: { requiredSteps: evaderStrat.getRequiredSteps(phase) },
+  }
+
   return {
     chaserPos,
     evaderPos,
     prevChaserPath: null,
     prevEvaderPath: null,
-    phase: 'planning',
+    phase,
     turn: 1,
     winner: null,
     obstacles,
     walls,
+    chaserPower,
+    evaderPower,
+    modifiers: [],
+    transientContext: {},
+    turnSchema,
     p1Plan: null,
     p2Plan: null,
     lastResolution: null,
@@ -38,7 +59,8 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
   const live = useRef({
     state: null as GameState | null,
     conn: null as DataConnection | null,
-    pendingP2Plan: null as TurnPlan | null,
+    hostPendingPlan: null as TurnPlan | null,
+    clientPendingPlan: null as TurnPlan | null,
   })
 
   const syncState = useCallback((next: GameState) => {
@@ -46,15 +68,30 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
     setGameState(next)
   }, [])
 
-  const resolveRoundAndSync = useCallback((p1Plan: TurnPlan, p2Plan: TurnPlan) => {
+  const checkExecutionTrigger = useCallback(() => {
     const current = live.current.state
     if (!current) return
 
-    const nextState = resolveRound(current, p1Plan, p2Plan)
-    syncState(nextState)
-    live.current.pendingP2Plan = null
-    setWaitingForPartner(false)
-    live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
+    const hostSchema = current.turnSchema.chaser
+    const clientSchema = current.turnSchema.evader
+
+    const hostReady = hostSchema.requiredSteps.length === 0 || live.current.hostPendingPlan !== null
+    const clientReady = clientSchema.requiredSteps.length === 0 || live.current.clientPendingPlan !== null
+
+    if (hostReady && clientReady) {
+      const p1Plan = live.current.hostPendingPlan
+      const p2Plan = live.current.clientPendingPlan
+
+      const nextState = processPhase(current, p1Plan, p2Plan)
+
+      // Clear pending plans for the next phase
+      live.current.hostPendingPlan = null
+      live.current.clientPendingPlan = null
+      setWaitingForPartner(false)
+
+      syncState(nextState)
+      live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
+    }
   }, [syncState])
 
   useEffect(() => {
@@ -82,11 +119,16 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
           const msg = raw as PeerMessage
           if (msg.type !== 'SUBMIT_PLAN') return
 
-          live.current.pendingP2Plan = msg.plan
           const current = live.current.state
-          if (current?.p1Plan) {
-            resolveRoundAndSync(current.p1Plan, msg.plan)
+          if (!current) return
+
+          // Implicit ACK validation: Discard packets from older states
+          if (msg.plan.turn !== current.turn || msg.plan.phase !== current.phase) {
+            return
           }
+
+          live.current.clientPendingPlan = msg.plan
+          checkExecutionTrigger()
         })
 
         conn.on('close', onDisconnect)
@@ -126,25 +168,22 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
       live.current.conn?.close()
       peer.destroy()
     }
-  }, [roomCode, playerRole, syncState, resolveRoundAndSync])
+  }, [roomCode, playerRole, syncState, checkExecutionTrigger])
 
   const submitPlan = useCallback((plan: TurnPlan) => {
     if (playerRole === 1) {
       const current = live.current.state
       if (!current) return
 
-      const p2Plan = live.current.pendingP2Plan
-      if (p2Plan) {
-        resolveRoundAndSync(plan, p2Plan)
-      } else {
-        syncState({ ...current, p1Plan: plan })
-        setWaitingForPartner(true)
-      }
+      live.current.hostPendingPlan = plan
+      // Show waiting indicator if the execution trigger doesn't fire immediately
+      setWaitingForPartner(true)
+      checkExecutionTrigger()
     } else {
       live.current.conn?.send({ type: 'SUBMIT_PLAN', plan } as PeerMessage)
       setWaitingForPartner(true)
     }
-  }, [playerRole, syncState, resolveRoundAndSync])
+  }, [playerRole, checkExecutionTrigger])
 
   return { gameState, status, errorMsg, waitingForPartner, submitPlan }
 }
