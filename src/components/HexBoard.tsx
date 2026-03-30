@@ -1,44 +1,34 @@
 import { motion } from 'motion/react'
-import type { HexCoord, WallCoord, GameSettings } from '../types'
+import type { HexCoord, WallCoord } from '../types'
 import {
   hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS,
-  squareToPixel, squarePolygonPoints, getAllSquares, SQUARE_RADIUS,
 } from '../lib/hexGrid'
 import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
 import type { PlanningPhase, DraftPlan } from './PlanningPanel'
 
-const HEX_SIZE    = 38
-const SQUARE_SIZE = 42
-const PADDING     = 30
+const HEX_SIZE = 38
+const PADDING  = 30
 
 function hexKey(h: HexCoord): string {
   return `${h.q},${h.r}`
 }
 
-function cellToPixel(q: number, r: number, settings: GameSettings): { x: number; y: number } {
-  return settings.gridType === 'square'
-    ? squareToPixel(q, r, SQUARE_SIZE)
-    : hexToPixel(q, r, HEX_SIZE)
+function cellToPixel(q: number, r: number): { x: number; y: number } {
+  return hexToPixel(q, r, HEX_SIZE)
 }
 
-function cellPolygonPoints(cx: number, cy: number, settings: GameSettings): string {
-  return settings.gridType === 'square'
-    ? squarePolygonPoints(cx, cy, SQUARE_SIZE - 2)
-    : hexPolygonPoints(cx, cy, HEX_SIZE - 1.5)
+function cellPolygonPoints(cx: number, cy: number): string {
+  return hexPolygonPoints(cx, cy, HEX_SIZE - 1.5)
 }
 
-function boardDimensions(settings: GameSettings): { width: number; height: number; offsetX: number; offsetY: number } {
-  if (settings.gridType === 'square') {
-    const side = (2 * SQUARE_RADIUS + 1) * SQUARE_SIZE + PADDING * 2
-    return { width: side, height: side, offsetX: side / 2, offsetY: side / 2 }
-  }
+function boardDimensions(): { width: number; height: number; offsetX: number; offsetY: number } {
   const width  = (3 * HEX_RADIUS + 2) * HEX_SIZE + PADDING * 2
   const height = Math.sqrt(3) * HEX_SIZE * (2 * HEX_RADIUS + 1) + PADDING * 2
   return { width, height, offsetX: width / 2, offsetY: height / 2 }
 }
 
-function getAllCells(settings: GameSettings): HexCoord[] {
-  return settings.gridType === 'square' ? getAllSquares() : getAllHexes()
+function getAllCells(): HexCoord[] {
+  return getAllHexes()
 }
 
 /**
@@ -83,36 +73,17 @@ function getValidTargets(
   opponentPos: HexCoord,
   obstacles: HexCoord[],
   walls: Set<string>,
-  settings: GameSettings,
 ): Set<string> {
   const blocked = obstacleSet(obstacles)
-  const { gridType } = settings
 
   switch (phase) {
-    case 'move_step1': {
-      if (settings.predictionTarget === 'destination') {
-        return new Set(reachableDestinations(myPos, blocked, gridType, settings.moveSteps, walls).map(hexKey))
-      }
-      return new Set(validNeighbors(myPos, blocked, gridType, walls).map(hexKey))
-    }
-    case 'move_step2': {
-      if (!draft.moveStep1) return new Set()
-      return new Set(validNeighbors(draft.moveStep1, blocked, gridType, walls).map(hexKey))
-    }
-    case 'predict_step1': {
-      if (settings.predictionTarget === 'destination') {
-        return new Set(reachableDestinations(opponentPos, blocked, gridType, settings.moveSteps, walls).map(hexKey))
-      }
-      return new Set(validNeighbors(opponentPos, blocked, gridType, walls).map(hexKey))
-    }
-    case 'predict_step2': {
-      if (!draft.predictStep1) return new Set()
-      return new Set(validNeighbors(draft.predictStep1, blocked, gridType, walls).map(hexKey))
-    }
+    case 'move_dest':
+      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
+    case 'predict_dest':
+      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
     case 'bonus_move': {
-      const finalPlanPos = draft.moveStep2 ?? draft.moveStep1
-      if (!finalPlanPos) return new Set()
-      return new Set(validNeighbors(finalPlanPos, blocked, gridType, walls).map(hexKey))
+      if (!draft.moveDest) return new Set()
+      return new Set(validNeighbors(draft.moveDest, blocked, walls).map(hexKey))
     }
     case 'ready':
       return new Set()
@@ -122,12 +93,11 @@ function getValidTargets(
 function pathPoints(
   a: HexCoord,
   b: HexCoord,
-  settings: GameSettings,
   offsetX: number,
   offsetY: number,
 ): { x1: number; y1: number; x2: number; y2: number } {
-  const pa = cellToPixel(a.q, a.r, settings)
-  const pb = cellToPixel(b.q, b.r, settings)
+  const pa = cellToPixel(a.q, a.r)
+  const pb = cellToPixel(b.q, b.r)
   return {
     x1: pa.x + offsetX,
     y1: pa.y + offsetY,
@@ -144,12 +114,10 @@ interface Props {
   isChaser: boolean
   obstacles: HexCoord[]
   walls: WallCoord[]
-  collectibleTokens: HexCoord[]
   planningPhase: PlanningPhase
   draft: DraftPlan
   waitingForPartner: boolean
   winner: 'chaser' | 'evader' | null
-  settings: GameSettings
   showCoords: boolean
   onHexClick: (hex: HexCoord) => void
 }
@@ -162,26 +130,24 @@ export function HexBoard({
   isChaser,
   obstacles,
   walls,
-  collectibleTokens,
   planningPhase,
   draft,
   waitingForPartner,
   winner,
-  settings,
   showCoords,
   onHexClick,
 }: Props) {
-  const { width: svgWidth, height: svgHeight, offsetX, offsetY } = boardDimensions(settings)
-  const allCells = getAllCells(settings)
+  const { width: svgWidth, height: svgHeight, offsetX, offsetY } = boardDimensions()
+  const allCells = getAllCells()
 
   const obstacleKeys = obstacleSet(obstacles)
   const wallKeys = buildWallSet(walls)
   const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles, wallKeys, settings)
+    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles, wallKeys)
     : new Set<string>()
 
-  const movePathKeys  = new Set([draft.moveStep1, draft.moveStep2].filter(Boolean).map(h => hexKey(h!)))
-  const predPathKeys  = new Set([draft.predictStep1, draft.predictStep2].filter(Boolean).map(h => hexKey(h!)))
+  const movePathKeys  = new Set(draft.moveDest ? [hexKey(draft.moveDest)] : [])
+  const predPathKeys  = new Set(draft.predictDest ? [hexKey(draft.predictDest)] : [])
   const bonusPathKeys = new Set(draft.bonusMove ? [hexKey(draft.bonusMove)] : [])
 
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
@@ -189,10 +155,10 @@ export function HexBoard({
   const bonusColor    = '#22c55e'
 
   function pp(a: HexCoord, b: HexCoord) {
-    return pathPoints(a, b, settings, offsetX, offsetY)
+    return pathPoints(a, b, offsetX, offsetY)
   }
 
-  const tokenSize = settings.gridType === 'square' ? SQUARE_SIZE * 0.7 : HEX_SIZE * 1.0
+  const tokenSize = HEX_SIZE * 1.0
 
   return (
     <div className="relative select-none" style={{ width: svgWidth, height: svgHeight }}>
@@ -217,7 +183,7 @@ export function HexBoard({
 
         {/* Cells */}
         {allCells.map(({ q, r }) => {
-          const { x, y } = cellToPixel(q, r, settings)
+          const { x, y } = cellToPixel(q, r)
           const cx = x + offsetX
           const cy = y + offsetY
           const key = `${q},${r}`
@@ -242,7 +208,7 @@ export function HexBoard({
           return (
             <g key={key} style={{ cursor: isValid ? 'pointer' : 'default' }} onClick={() => isValid && onHexClick({ q, r })}>
               <polygon
-                points={cellPolygonPoints(cx, cy, settings)}
+                points={cellPolygonPoints(cx, cy)}
                 fill={fill}
                 stroke={stroke}
                 strokeWidth={strokeWidth}
@@ -254,7 +220,7 @@ export function HexBoard({
                   y={cy + 1}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fontSize={settings.gridType === 'square' ? 11 : 10}
+                  fontSize={10}
                   fontWeight="600"
                   fill={isObstacle ? '#a87070' : '#a0a0a0'}
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
@@ -282,53 +248,17 @@ export function HexBoard({
           )
         })}
 
-        {/* Collectible tokens */}
-        {collectibleTokens.map(({ q, r }) => {
-          const { x, y } = cellToPixel(q, r, settings)
-          const cx = x + offsetX
-          const cy = y + offsetY
-          const s = settings.gridType === 'square' ? SQUARE_SIZE * 0.22 : HEX_SIZE * 0.26
-          return (
-            <polygon
-              key={`token-${q},${r}`}
-              points={[
-                [cx,     cy - s * 1.4],
-                [cx + s, cy          ],
-                [cx,     cy + s * 1.4],
-                [cx - s, cy          ],
-              ].map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(' ')}
-              fill="#f59e0b"
-              stroke="#fbbf24"
-              strokeWidth={1}
-              opacity={0.9}
-              style={{ pointerEvents: 'none' }}
-            />
-          )
-        })}
-
-        {/* Move path arrows */}
-        {draft.moveStep1 && (() => {
-          const { x1, y1, x2, y2 } = pp(myPos, draft.moveStep1)
-          return <line x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
-            markerEnd="url(#arrow-move)" />
-        })()}
-        {draft.moveStep1 && draft.moveStep2 && (() => {
-          const { x1, y1, x2, y2 } = pp(draft.moveStep1!, draft.moveStep2)
+        {/* Move path arrow */}
+        {draft.moveDest && (() => {
+          const { x1, y1, x2, y2 } = pp(myPos, draft.moveDest)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
             stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
             markerEnd="url(#arrow-move)" />
         })()}
 
-        {/* Prediction path arrows (purple dashed) */}
-        {draft.predictStep1 && (() => {
-          const { x1, y1, x2, y2 } = pp(opponentPos, draft.predictStep1)
-          return <line x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke="#a855f7" strokeWidth={2} strokeOpacity={0.6}
-            strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
-        })()}
-        {draft.predictStep1 && draft.predictStep2 && (() => {
-          const { x1, y1, x2, y2 } = pp(draft.predictStep1!, draft.predictStep2)
+        {/* Prediction path arrow (purple dashed) */}
+        {draft.predictDest && (() => {
+          const { x1, y1, x2, y2 } = pp(opponentPos, draft.predictDest)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
             stroke="#a855f7" strokeWidth={2} strokeOpacity={0.6}
             strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
@@ -336,7 +266,7 @@ export function HexBoard({
 
         {/* Bonus move arrow (green dashed, from planned final pos) */}
         {draft.bonusMove && (() => {
-          const fromPos = draft.moveStep2 ?? draft.moveStep1
+          const fromPos = draft.moveDest
           if (!fromPos) return null
           const { x1, y1, x2, y2 } = pp(fromPos, draft.bonusMove)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
@@ -369,7 +299,7 @@ export function HexBoard({
 
       {/* Opponent token */}
       {(() => {
-        const { x, y } = cellToPixel(opponentPos.q, opponentPos.r, settings)
+        const { x, y } = cellToPixel(opponentPos.q, opponentPos.r)
         return (
           <motion.div
             key="opponent"
@@ -400,7 +330,7 @@ export function HexBoard({
 
       {/* My token */}
       {(() => {
-        const { x, y } = cellToPixel(myPos.q, myPos.r, settings)
+        const { x, y } = cellToPixel(myPos.q, myPos.r)
         const myTokenSize = tokenSize * 1.1
         return (
           <motion.div
