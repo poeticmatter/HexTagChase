@@ -3,6 +3,7 @@ import type { GamePhase, PowerName, StandardPlan } from '../../types'
 
 export class DeclarerPower extends BasePower {
   readonly name: PowerName = 'Declarer'
+  readonly description = 'Before planning, publicly declare your intended destination. If you fulfill the declaration, you earn a bonus move — and if your opponent predicted you, their bonus is nullified.'
 
   override requiresPhase(phase: GamePhase): boolean {
     return phase === 'declaring'

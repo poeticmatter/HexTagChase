@@ -143,6 +143,8 @@ function GameView({
 
   const isChaser     = gameState.settings.chaserPlayer === playerRole
   const maxTurns     = gameState.settings.maxTurns
+  const myPowerName  = isChaser ? gameState.settings.chaserPower : gameState.settings.evaderPower
+  const oppPowerName = isChaser ? gameState.settings.evaderPower : gameState.settings.chaserPower
   const myPos        = isChaser ? gameState.chaserPos    : gameState.evaderPos
   const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
@@ -218,6 +220,8 @@ function GameView({
             draft={draft}
             lastResolution={gameState.lastResolution}
             waitingForPartner={waitingForPartner}
+            myPowerName={myPowerName}
+            oppPowerName={oppPowerName}
             onConfirm={handleConfirm}
             onReset={handleReset}
           />

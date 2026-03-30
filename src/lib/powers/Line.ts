@@ -4,6 +4,7 @@ import { hexDistance, isOnBoard, HEX_DIRECTIONS } from '../hexGrid'
 
 export class LinePower extends BasePower {
   readonly name: PowerName = 'Line'
+  readonly description = 'Choose two destination hexes. You automatically move to whichever one your opponent didn\'t predict. If they guess either one, you earn a bonus move.'
 
   // Line uses 2 hex targets. During execution, it moves to the one NOT predicted.
   // If both predicted or both missed, it defaults to the first one (or we define a tiebreaker).

@@ -51,6 +51,7 @@ import type { UIStep } from '../../types'
 
 export interface IAthletePower {
   readonly name: PowerName
+  readonly description: string
 
   /** Returns true if this power requires a given phase. */
   requiresPhase(phase: GameState['phase']): boolean
@@ -88,6 +89,7 @@ export interface IAthletePower {
 
 export abstract class BasePower implements IAthletePower {
   abstract readonly name: PowerName
+  abstract readonly description: string
 
   requiresPhase(phase: GameState['phase']): boolean {
     return false

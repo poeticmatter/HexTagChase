@@ -3,6 +3,7 @@ import type { PowerName, StandardPlan } from '../../types'
 
 export class VaultPower extends BasePower {
   readonly name: PowerName = 'Vault'
+  readonly description = 'Your movement is cancelled if your opponent correctly predicts your landing hex. Use unpredictable paths to avoid being read.'
 
   override onBeforeMoveExecution(
     ctx: BeforeMoveExecutionCtx,

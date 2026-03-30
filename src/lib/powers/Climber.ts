@@ -4,6 +4,7 @@ import { hexDistance, isOnBoard, HEX_DIRECTIONS } from '../hexGrid'
 
 export class ClimberPower extends BasePower {
   readonly name: PowerName = 'Climber'
+  readonly description = 'You can move through obstacle hexes as intermediate steps. This lets you reach destinations that are blocked to other athletes.'
 
   override onReachableDestinationsRequest(
     ctx: ReachableDestinationsCtx,

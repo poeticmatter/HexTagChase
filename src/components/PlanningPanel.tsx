@@ -1,4 +1,6 @@
-import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep } from '../types'
+import { useMemo, useState } from 'react'
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, PowerName } from '../types'
+import { getPowerStrategy } from '../lib/powers/PowerFactory'
 
 export interface DraftPlan {
   declaration: HexCoord | null
@@ -48,6 +50,39 @@ export function draftToTurnPlan(draft: DraftPlan, schema: TurnSchema, turn: numb
     turn,
     phase
   }
+}
+
+// ── Power info card ───────────────────────────────────────────────────────
+
+interface PowerInfoCardProps {
+  powerName: PowerName
+  label: string
+  accentClass: string
+}
+
+function PowerInfoCard({ powerName, label, accentClass }: PowerInfoCardProps) {
+  const [expanded, setExpanded] = useState(false)
+  const description = useMemo(() => getPowerStrategy(powerName).description, [powerName])
+
+  return (
+    <div className="rounded-lg border border-neutral-700 bg-neutral-800/40 text-xs overflow-hidden">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-neutral-700/30 transition-colors"
+      >
+        <span className="text-neutral-500 uppercase tracking-wider">{label}</span>
+        <span className="flex items-center gap-2">
+          <span className={`font-semibold ${accentClass}`}>{powerName}</span>
+          <span className="text-neutral-600">{expanded ? '▲' : '▼'}</span>
+        </span>
+      </button>
+      {expanded && (
+        <p className="px-3 pb-2 text-neutral-400 leading-relaxed border-t border-neutral-700/60 pt-2">
+          {description}
+        </p>
+      )}
+    </div>
+  )
 }
 
 // ── Resolution banner ─────────────────────────────────────────────────────
@@ -173,6 +208,8 @@ interface Props {
   currentStep: UIStep | 'ready'
   lastResolution: ResolutionSummary | null
   waitingForPartner: boolean
+  myPowerName: PowerName
+  oppPowerName: PowerName
   onConfirm: (plan: TurnPlan) => void
   onReset: () => void
 }
@@ -187,6 +224,8 @@ export function PlanningPanel({
   currentStep,
   lastResolution,
   waitingForPartner,
+  myPowerName,
+  oppPowerName,
   onConfirm,
   onReset,
 }: Props) {
@@ -214,6 +253,20 @@ export function PlanningPanel({
       <div className="flex items-center justify-between">
         <span className={`text-sm font-bold ${roleColor}`}>{role}</span>
         <span className="text-xs text-neutral-500">{goal}</span>
+      </div>
+
+      {/* Power info */}
+      <div className="flex flex-col gap-1">
+        <PowerInfoCard
+          powerName={myPowerName}
+          label="Your power"
+          accentClass={isChaser ? 'text-red-400' : 'text-blue-400'}
+        />
+        <PowerInfoCard
+          powerName={oppPowerName}
+          label="Opponent"
+          accentClass={isChaser ? 'text-blue-400' : 'text-red-400'}
+        />
       </div>
 
       {/* Last resolution */}

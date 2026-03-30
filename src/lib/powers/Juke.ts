@@ -3,6 +3,7 @@ import type { GamePhase, PowerName, ReactionPlan } from '../../types'
 
 export class JukePower extends BasePower {
   readonly name: PowerName = 'Juke'
+  readonly description = 'After both plans are locked in, you enter a reaction phase where you can choose to abort your move after seeing your opponent\'s committed plan.'
 
   override requiresPhase(phase: GamePhase): boolean {
     return phase === 'reacting'

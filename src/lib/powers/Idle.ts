@@ -4,6 +4,7 @@ import { validNeighbors, reachableDestinations } from '../hexGameLogic'
 
 export class IdlePower extends BasePower {
   readonly name: PowerName = 'Idle'
+  readonly description = 'You may skip your move this turn. Doing so grants you range-3 movement on your next turn, letting you reach hexes two steps further than normal.'
 
   override onReachableDestinationsRequest(
     ctx: ReachableDestinationsCtx,
