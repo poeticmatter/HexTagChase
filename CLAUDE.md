@@ -11,56 +11,110 @@ npm run build      # Production build
 npm run preview    # Preview production build
 npm run lint       # TypeScript type checking (tsc --noEmit)
 npm run clean      # Remove dist directory
+npm run deploy     # Build and publish to GitHub Pages
 ```
 
-Requires `GEMINI_API_KEY` set in `.env.local` (see `.env.example`).
+Optional: set `DISABLE_HMR=true` in `.env.local` to disable hot module replacement (useful in some AI Studio environments).
 
 ## Architecture
 
-Single-page React puzzle game with all logic in `src/App.tsx` (~360 lines). No routing, no backend — pure client-side.
+Two-player peer-to-peer hex grid game ("Hex Tag"). No backend — PeerJS handles networking directly between browsers.
 
-**Game concept** (from `metadata.json`): A puzzle where sliding a button moves all buttons of the same color, and clicking a paint bucket copies its color to adjacent buttons.
+**Game concept**: A chaser and evader take turns on a hex grid. The chaser wins by reaching an adjacent hex; the evader wins by surviving 15 turns. Both players choose their movement, a predicted destination for their opponent, and an optional bonus move each round.
+
+### File Structure
+
+```
+src/
+├── App.tsx                    # Root component — routes between Lobby and GameView
+├── types.ts                   # All core types and discriminated unions
+├── main.tsx
+├── components/
+│   ├── HexBoard.tsx           # SVG hex renderer with drag/click interaction
+│   ├── Lobby.tsx              # Room creation/join UI
+│   └── PlanningPanel.tsx      # Multi-phase input UI with step tracking
+├── hooks/
+│   └── useHexGame.ts          # PeerJS orchestrator + game state manager
+└── lib/
+    ├── hexGrid.ts             # Hex coordinate utilities and rendering math
+    ├── hexGameLogic.ts        # Core game resolution engine and map generation
+    └── powers/
+        ├── IAthletePower.ts   # Interface + BasePower abstract class
+        ├── PowerFactory.ts    # Factory — maps PowerName → strategy instance
+        ├── Standard.ts        # Baseline: 2-step move, prediction, bonus
+        ├── Vault.ts           # Cancels movement if opponent predicts landing
+        ├── Juke.ts            # Reacting phase: decides execution after seeing opponent
+        ├── Line.ts            # Chooses between two targets; opponent can't predict both
+        ├── Idle.ts            # Can skip move; grants range_3 buff next turn
+        ├── Climber.ts         # Can traverse obstacles in a 2-step move
+        └── Declarer.ts        # Declares intended target; bonus if fulfilled
+```
 
 ### Core Data Model
 
-```ts
-type EntityType = 'button' | 'block' | 'target'
-type Color = 'red' | 'blue' | 'green'
-type Entity = { id, type, color, x, y }
-type LevelData = { entities, initialEntities, targets }
+Key types live in `src/types.ts`:
+
+- `HexCoord { q, r }` — axial hex coordinates
+- `GameState` — positions, obstacles, walls, phase, turn counter, modifiers, transient context
+- `GamePhase = 'declaring' | 'planning' | 'reacting'` (resolution is implicit after reacting)
+- `PowerName` — union of all 7 power names
+- `TurnPlan` — discriminated union: `StandardPlan | LinePlan | IdlePlan | DeclarationPlan | ReactionPlan`
+- `Modifier { role, effect, expiresAtTurn }` — persistent turn buffs (e.g., `range_3` from Idle)
+
+### Game Phase Pipeline
+
+Each turn flows through active phases in order, then resolves:
+
+```
+declaring  →  planning  →  reacting  →  _resolveRound()  →  next turn
 ```
 
-State is a single `useState<LevelData>` — all updates are pure functional (no mutation).
+Only phases declared by one of the active powers via `requiresPhase()` run. Planning always runs. After resolution, `transientContext` (declarations, unmasked moves, reaction plans) is reset.
 
-### Entity Types on the 5×5 Grid
+### Athlete Powers System
 
-- **Buttons** — player-controlled colored tiles; dragging one moves ALL tiles of that color simultaneously
-- **Blocks** (paint buckets) — stationary; clicking one repaints orthogonally adjacent buttons to the block's color
-- **Targets** — goal positions rendered as dashed outlines; win when every button matches its target color and position
+Powers follow the **Strategy Pattern**: each extends `BasePower` and overrides only the hooks it needs.
 
-### Key Mechanics
+| Hook | Purpose |
+|------|---------|
+| `onReachableDestinationsRequest()` | Modify available movement targets |
+| `onBeforeMoveExecution()` | Abort movement (return `false` to cancel) |
+| `onPathExecution()` | Alter the path taken |
+| `onBonusCalculation()` | Control self-bonus and nullify opponent bonus |
+| `onRoundEnd()` | Add modifiers or persist state |
+| `requiresPhase()` / `getRequiredSteps()` | Declare which phases and UI steps are needed |
 
-- **Slide**: Pointer drag on a button → detect direction → move all same-color buttons until blocked by grid edge or any entity
-- **Paint**: Pointer tap on a block → find orthogonal neighbors that are buttons → change their color
-- **Win check**: After every state change, compare button positions/colors against targets
-- **Level gen** (`generateRandomLevel`): Randomly shuffles a flat list of grid positions, then places blocks, targets, and buttons
+`_resolveRound()` in `hexGameLogic.ts` calls these hooks in strict order for both players. Powers are fully encapsulated — core logic does not reference specific power names.
 
-### Animations
+### Adding a New Power
 
-Motion library (`motion` package) wraps entity `<div>`s with spring animations for smooth sliding. HMR can be disabled via `DISABLE_HMR=true` env var (useful in some AI Studio environments).
+Adding a power requires exactly these four steps (never partially implement):
 
-### Styling
+1. Create `src/lib/powers/MyPower.ts` extending `BasePower`, override relevant hooks
+2. Add the name to the `PowerName` union in `src/types.ts`
+3. If the power needs a new plan shape, add it to the `TurnPlan` discriminated union in `src/types.ts` and handle it in all exhaustive switches
+4. Register it in `PowerFactory.getPowerStrategy()` in `src/lib/powers/PowerFactory.ts`
 
-Tailwind CSS v4 (via `@tailwindcss/vite` plugin). No separate config file — Tailwind is imported directly in `src/index.css`. Absolute positioning within a fixed-size grid container (`GRID_SIZE=5`, `CELL_SIZE=64px`).
+### Networking (Orchestrator)
+
+`useHexGame.ts` implements a **commit-and-hold** pattern to prevent host advantage:
+
+- Host stores its plan locally, waits for the client's plan to arrive over PeerJS
+- Only when both plans are present does `processPhase()` run; the resulting state is broadcast to the client
+- Client applies received state directly — it never runs resolution itself
+
+Message types are discriminated: `GAME_STATE` (broadcast) and `SUBMIT_PLAN` (player action).
 
 ### Architecture Rules
-- **Decoupling**: UI must never read from or write to game state directly. UI components react to store values only; all mutations go through `Dispatch()` in `orchestrator.ts`.
-- **Single Responsibility**: Each class/module does one thing. Do not add unrelated logic to existing handlers or mechanics.
-- **Composition over Inheritance**: Prefer component-based patterns. Flag deep inheritance hierarchies rather than extending them.
-- **Predictability**: State changes must be deterministic and centralized. All game logic flows through the orchestrator pipeline — do not introduce side-effect state mutations outside it.
+
+- **Decoupling**: UI components react to state values only. All mutations go through `processPhase()` / `useHexGame`'s dispatch logic — never mutate state directly in components.
+- **Single Responsibility**: Each power class does one thing. Do not add unrelated logic to existing power hooks or `hexGameLogic.ts`.
+- **Predictability**: All game logic flows through the `processPhase()` → `_resolveRound()` pipeline. Do not introduce state mutations outside it.
+- **OCP compliance**: Adding powers must not require changes to `hexGameLogic.ts` — only hook overrides and factory registration.
 
 ### Change Discipline
+
 - Maintain existing patterns unless explicitly instructed to refactor.
 - If a requested change requires touching more than 3 files, state which files will be affected before proceeding.
-- Do not modify `packages/shared/src/types.ts` or `schema.ts` without explicit instruction — changes there cascade across the monorepo.
-- When adding a new Effect or Countermeasure, always update all four locations listed in the "Adding New Effects" section above. Never partially implement.
+- Do not modify `src/types.ts` without explicit instruction — `TurnPlan` and `PowerName` changes cascade to all exhaustive switches across the codebase.
+- When adding a new power, always complete all four steps above. Never partially implement.
