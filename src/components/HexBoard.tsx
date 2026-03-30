@@ -1,10 +1,10 @@
 import { motion } from 'motion/react'
-import type { HexCoord, GameSettings } from '../types'
+import type { HexCoord, WallCoord, GameSettings } from '../types'
 import {
   hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS,
   squareToPixel, squarePolygonPoints, getAllSquares, SQUARE_RADIUS,
 } from '../lib/hexGrid'
-import { obstacleSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
+import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
 import type { PlanningPhase, DraftPlan } from './PlanningPanel'
 
 const HEX_SIZE    = 38
@@ -41,12 +41,48 @@ function getAllCells(settings: GameSettings): HexCoord[] {
   return settings.gridType === 'square' ? getAllSquares() : getAllHexes()
 }
 
+/**
+ * Returns the two pixel endpoints of the hex edge shared between adjacent cells (q1,r1)→(q2,r2).
+ * Coordinates are relative to the board origin (before adding offsetX/offsetY).
+ */
+function hexWallEdgePoints(
+  q1: number, r1: number, q2: number, r2: number,
+  size: number,
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  const dq = q2 - q1
+  const dr = r2 - r1
+  const s = size
+  const h = (Math.sqrt(3) / 2) * s
+
+  // Edge vertex offsets from the center of (q1,r1) for each hex direction
+  const edgeOffsets: Record<string, [[number, number], [number, number]]> = {
+    '0,-1':  [[-s / 2, -h], [s / 2, -h]],
+    '1,-1':  [[s / 2, -h],  [s, 0]],
+    '1,0':   [[s, 0],       [s / 2, h]],
+    '0,1':   [[s / 2, h],   [-s / 2, h]],
+    '-1,1':  [[-s / 2, h],  [-s, 0]],
+    '-1,0':  [[-s, 0],      [-s / 2, -h]],
+  }
+
+  const offsets = edgeOffsets[`${dq},${dr}`]
+  if (!offsets) return null
+
+  const { x: ax, y: ay } = hexToPixel(q1, r1, size)
+  return {
+    x1: ax + offsets[0][0],
+    y1: ay + offsets[0][1],
+    x2: ax + offsets[1][0],
+    y2: ay + offsets[1][1],
+  }
+}
+
 function getValidTargets(
   phase: PlanningPhase,
   draft: DraftPlan,
   myPos: HexCoord,
   opponentPos: HexCoord,
   obstacles: HexCoord[],
+  walls: Set<string>,
   settings: GameSettings,
 ): Set<string> {
   const blocked = obstacleSet(obstacles)
@@ -55,29 +91,28 @@ function getValidTargets(
   switch (phase) {
     case 'move_step1': {
       if (settings.predictionTarget === 'destination') {
-        return new Set(reachableDestinations(myPos, blocked, gridType, settings.moveSteps).map(hexKey))
+        return new Set(reachableDestinations(myPos, blocked, gridType, settings.moveSteps, walls).map(hexKey))
       }
-      return new Set(validNeighbors(myPos, blocked, gridType).map(hexKey))
+      return new Set(validNeighbors(myPos, blocked, gridType, walls).map(hexKey))
     }
     case 'move_step2': {
       if (!draft.moveStep1) return new Set()
-      return new Set(validNeighbors(draft.moveStep1, blocked, gridType).map(hexKey))
+      return new Set(validNeighbors(draft.moveStep1, blocked, gridType, walls).map(hexKey))
     }
     case 'predict_step1': {
       if (settings.predictionTarget === 'destination') {
-        return new Set(reachableDestinations(opponentPos, blocked, gridType, settings.moveSteps).map(hexKey))
+        return new Set(reachableDestinations(opponentPos, blocked, gridType, settings.moveSteps, walls).map(hexKey))
       }
-      return new Set(validNeighbors(opponentPos, blocked, gridType).map(hexKey))
+      return new Set(validNeighbors(opponentPos, blocked, gridType, walls).map(hexKey))
     }
     case 'predict_step2': {
       if (!draft.predictStep1) return new Set()
-      return new Set(validNeighbors(draft.predictStep1, blocked, gridType).map(hexKey))
+      return new Set(validNeighbors(draft.predictStep1, blocked, gridType, walls).map(hexKey))
     }
     case 'bonus_move': {
-      // Planned from the player's expected final position after regular moves
       const finalPlanPos = draft.moveStep2 ?? draft.moveStep1
       if (!finalPlanPos) return new Set()
-      return new Set(validNeighbors(finalPlanPos, blocked, gridType).map(hexKey))
+      return new Set(validNeighbors(finalPlanPos, blocked, gridType, walls).map(hexKey))
     }
     case 'ready':
       return new Set()
@@ -108,6 +143,7 @@ interface Props {
   prevOpponentPath: HexCoord[] | null
   isChaser: boolean
   obstacles: HexCoord[]
+  walls: WallCoord[]
   collectibleTokens: HexCoord[]
   planningPhase: PlanningPhase
   draft: DraftPlan
@@ -125,6 +161,7 @@ export function HexBoard({
   prevOpponentPath,
   isChaser,
   obstacles,
+  walls,
   collectibleTokens,
   planningPhase,
   draft,
@@ -138,8 +175,9 @@ export function HexBoard({
   const allCells = getAllCells(settings)
 
   const obstacleKeys = obstacleSet(obstacles)
+  const wallKeys = buildWallSet(walls)
   const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles, settings)
+    ? getValidTargets(planningPhase, draft, myPos, opponentPos, obstacles, wallKeys, settings)
     : new Set<string>()
 
   const movePathKeys  = new Set([draft.moveStep1, draft.moveStep2].filter(Boolean).map(h => hexKey(h!)))
@@ -225,6 +263,22 @@ export function HexBoard({
                 </text>
               )}
             </g>
+          )
+        })}
+
+        {/* Walls */}
+        {walls.map(({ q1, r1, q2, r2 }) => {
+          const pts = hexWallEdgePoints(q1, r1, q2, r2, HEX_SIZE)
+          if (!pts) return null
+          return (
+            <line
+              key={`wall-${q1},${r1}>${q2},${r2}`}
+              x1={pts.x1 + offsetX} y1={pts.y1 + offsetY}
+              x2={pts.x2 + offsetX} y2={pts.y2 + offsetY}
+              stroke="#c0392b"
+              strokeWidth={3}
+              strokeLinecap="round"
+            />
           )
         })}
 

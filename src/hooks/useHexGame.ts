@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, GameSettings } from '../types'
 import { DEFAULT_SETTINGS } from '../types'
-import { getInitialPositions, generateObstacles, resolveRound, COLLECTIBLE_TOKENS } from '../lib/hexGameLogic'
+import { getInitialPositions, generateObstacles, generateWalls, resolveRound, COLLECTIBLE_TOKENS } from '../lib/hexGameLogic'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
@@ -10,6 +10,16 @@ type PeerMessage =
 
 function buildInitialState(settings: GameSettings): GameState {
   const { chaserPos, evaderPos } = getInitialPositions()
+  const { gridType, obstacleMode, evaderObjective } = settings
+
+  const obstacles = (obstacleMode === 'hexes' || obstacleMode === 'both')
+    ? generateObstacles(chaserPos, evaderPos, gridType, evaderObjective === 'collect' ? COLLECTIBLE_TOKENS : [])
+    : []
+
+  const walls = (obstacleMode === 'walls' || obstacleMode === 'both')
+    ? generateWalls(chaserPos, evaderPos, obstacles, gridType, obstacleMode === 'walls' ? 4 : 2)
+    : []
+
   return {
     chaserPos,
     evaderPos,
@@ -18,15 +28,13 @@ function buildInitialState(settings: GameSettings): GameState {
     phase: 'planning',
     turn: 1,
     winner: null,
-    obstacles: generateObstacles(
-      chaserPos, evaderPos, settings.gridType,
-      settings.evaderObjective === 'collect' ? COLLECTIBLE_TOKENS : [],
-    ),
+    obstacles,
+    walls,
     p1Plan: null,
     p2Plan: null,
     lastResolution: null,
     settings,
-    collectibleTokens: settings.evaderObjective === 'collect' ? [...COLLECTIBLE_TOKENS] : [],
+    collectibleTokens: evaderObjective === 'collect' ? [...COLLECTIBLE_TOKENS] : [],
     tokensCollected: 0,
   }
 }

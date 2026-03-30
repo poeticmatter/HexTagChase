@@ -3,6 +3,12 @@ export interface HexCoord {
   r: number
 }
 
+/** A wall blocking the passage between two adjacent cells (stored as a normalized pair). */
+export interface WallCoord {
+  q1: number; r1: number
+  q2: number; r2: number
+}
+
 export type Role = 'chaser' | 'evader'
 
 export type PredictionQuality = 'none' | 'partial' | 'full'
@@ -19,6 +25,8 @@ export interface GameSettings {
   maxTurns: number
   /** Which role the host (player 1) plays. */
   hostRole: 'chaser' | 'evader'
+  /** hexes: blocked cells. walls: impassable edges between cells. both: combination. */
+  obstacleMode: 'hexes' | 'walls' | 'both'
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -29,6 +37,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   evaderObjective: 'survive',
   maxTurns: 15,
   hostRole: 'chaser',
+  obstacleMode: 'hexes',
 }
 
 /** A submitted plan for one turn. */
@@ -58,6 +67,7 @@ export interface GameState {
   turn: number
   winner: Role | null
   obstacles: HexCoord[]
+  walls: WallCoord[]
   p1Plan: TurnPlan | null   // p1 = chaser
   p2Plan: TurnPlan | null   // p2 = evader
   lastResolution: ResolutionSummary | null

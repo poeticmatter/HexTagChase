@@ -79,6 +79,27 @@ function SettingsScreen({ settings, onChange, onStart, onBack }: SettingsScreenP
             </p>
           </div>
 
+          {/* Obstacles */}
+          <div className="flex flex-col gap-1.5 py-3 border-b border-neutral-800">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-neutral-200">Obstacles</span>
+              <SegmentedToggle
+                value={settings.obstacleMode}
+                options={[
+                  { label: 'Hexes', value: 'hexes' },
+                  { label: 'Walls', value: 'walls' },
+                  { label: 'Both', value: 'both' },
+                ]}
+                onChange={v => set('obstacleMode', v)}
+              />
+            </div>
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              {settings.obstacleMode === 'hexes' && 'Blocked cells — impassable territory scattered across the board.'}
+              {settings.obstacleMode === 'walls' && 'Edge walls — invisible lines between cells that block passage in one direction.'}
+              {settings.obstacleMode === 'both' && 'Blocked cells plus edge walls for a denser, more complex layout.'}
+            </p>
+          </div>
+
           {/* Turns to survive */}
           <div className="flex flex-col gap-2 py-3">
             <div className="flex items-center justify-between gap-4">

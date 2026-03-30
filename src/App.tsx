@@ -179,6 +179,7 @@ function GameView({
         prevOpponentPath={prevOpponentPath}
         isChaser={isChaser}
         obstacles={gameState.obstacles}
+        walls={gameState.walls}
         collectibleTokens={gameState.collectibleTokens}
         showCoords={showCoords}
         planningPhase={planningPhase}
