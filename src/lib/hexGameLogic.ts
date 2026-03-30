@@ -1,5 +1,4 @@
 import type { HexCoord, WallCoord, GameState, TurnPlan, ResolutionSummary } from '../types'
-import { MAX_TURNS } from '../types'
 import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
@@ -685,7 +684,7 @@ function buildNextState(
   const chaserCatches = hexDistance(finalChaserPos.q, finalChaserPos.r, finalEvaderPos.q, finalEvaderPos.r) <= 1
 
   // Win condition: Evader survived max turns, or chaser caught evader
-  const evaderSurvived = !chaserCatches && turn >= MAX_TURNS
+  const evaderSurvived = !chaserCatches && turn >= state.settings.maxTurns
   const winner = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
   // Process modifiers

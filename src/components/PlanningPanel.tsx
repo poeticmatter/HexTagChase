@@ -1,7 +1,4 @@
-import type { HexCoord, TurnPlan, ResolutionSummary } from '../types'
-import { MAX_TURNS } from '../types'
-
-import type { TurnSchema, UIStep } from '../types'
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep } from '../types'
 
 export interface DraftPlan {
   declaration: HexCoord | null
@@ -169,6 +166,7 @@ function buildSteps(
 interface Props {
   isChaser: boolean
   turn: number
+  maxTurns: number
   phase: any
   draft: DraftPlan
   schema: TurnSchema
@@ -182,6 +180,7 @@ interface Props {
 export function PlanningPanel({
   isChaser,
   turn,
+  maxTurns,
   phase,
   draft,
   schema,
@@ -196,7 +195,7 @@ export function PlanningPanel({
   const roleColor = isChaser ? 'text-red-400' : 'text-blue-400'
   const goal = isChaser
     ? 'Tag the evader (end adjacent)'
-    : `Survive ${MAX_TURNS} turns`
+    : `Survive ${maxTurns} turns`
 
   const isComplete = isDraftComplete(draft, schema)
 

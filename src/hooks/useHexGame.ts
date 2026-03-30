@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
-import type { GameState, TurnPlan, ConnectionStatus } from '../types'
+import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
 import { getInitialPositions, generateObstacles, generateWalls, processPhase } from '../lib/hexGameLogic'
 import { getPowerStrategy } from '../lib/powers/PowerFactory'
 
@@ -8,14 +8,13 @@ type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
 
-function buildInitialState(): GameState {
+function buildInitialState(settings: MatchSettings): GameState {
   const { chaserPos, evaderPos } = getInitialPositions()
 
   const obstacles = generateObstacles(chaserPos, evaderPos)
   const walls = generateWalls(chaserPos, evaderPos, obstacles)
 
-  const chaserPower = 'Standard' as const
-  const evaderPower = 'Standard' as const
+  const { chaserPower, evaderPower } = settings
   const chaserStrat = getPowerStrategy(chaserPower)
   const evaderStrat = getPowerStrategy(evaderPower)
 
@@ -30,6 +29,7 @@ function buildInitialState(): GameState {
   }
 
   return {
+    settings,
     chaserPos,
     evaderPos,
     prevChaserPath: null,
@@ -50,7 +50,7 @@ function buildInitialState(): GameState {
   }
 }
 
-export function useHexGame(roomCode: string, playerRole: 1 | 2) {
+export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchSettings | null) {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
@@ -72,15 +72,18 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
     const current = live.current.state
     if (!current) return
 
-    const hostSchema = current.turnSchema.chaser
-    const clientSchema = current.turnSchema.evader
+    // Route plans into chaser (p1) / evader (p2) slots based on who is actually the chaser.
+    // The host is always playerRole 1, but may have chosen to play as evader.
+    const hostIsChaser = current.settings.chaserPlayer === 1
+    const hostSchema = hostIsChaser ? current.turnSchema.chaser : current.turnSchema.evader
+    const clientSchema = hostIsChaser ? current.turnSchema.evader : current.turnSchema.chaser
 
     const hostReady = hostSchema.requiredSteps.length === 0 || live.current.hostPendingPlan !== null
     const clientReady = clientSchema.requiredSteps.length === 0 || live.current.clientPendingPlan !== null
 
     if (hostReady && clientReady) {
-      const p1Plan = live.current.hostPendingPlan
-      const p2Plan = live.current.clientPendingPlan
+      const p1Plan = hostIsChaser ? live.current.hostPendingPlan : live.current.clientPendingPlan
+      const p2Plan = hostIsChaser ? live.current.clientPendingPlan : live.current.hostPendingPlan
 
       const nextState = processPhase(current, p1Plan, p2Plan)
 
@@ -103,7 +106,8 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
     const onError = (msg: string) => { setErrorMsg(msg); setStatus('error') }
 
     if (playerRole === 1) {
-      syncState(buildInitialState())
+      if (!settings) return
+      syncState(buildInitialState(settings))
       peer.on('open', () => setStatus('waiting_for_partner'))
 
       peer.on('connection', (conn: DataConnection) => {
@@ -168,7 +172,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2) {
       live.current.conn?.close()
       peer.destroy()
     }
-  }, [roomCode, playerRole, syncState, checkExecutionTrigger])
+  }, [roomCode, playerRole, settings, syncState, checkExecutionTrigger])
 
   const submitPlan = useCallback((plan: TurnPlan) => {
     if (playerRole === 1) {

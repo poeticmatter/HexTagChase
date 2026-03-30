@@ -10,9 +10,14 @@ export interface WallCoord {
 
 export type Role = 'chaser' | 'evader'
 
-export const MAX_TURNS = 15
-export const HOST_ROLE = 'chaser'
 export const OBSTACLE_MODE = 'both'
+
+export interface MatchSettings {
+  maxTurns: number
+  chaserPlayer: 1 | 2
+  chaserPower: PowerName
+  evaderPower: PowerName
+}
 
 export type PowerName =
   | 'Standard'
@@ -115,6 +120,7 @@ export interface ResolutionSummary {
 }
 
 export interface GameState {
+  settings: MatchSettings
   chaserPos: HexCoord
   evaderPos: HexCoord
   prevChaserPath: HexCoord[] | null

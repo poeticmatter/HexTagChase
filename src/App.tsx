@@ -5,8 +5,9 @@ import { PlanningPanel } from './components/PlanningPanel'
 import type { DraftPlan } from './components/PlanningPanel'
 import type { TurnSchema, UIStep } from './types'
 import { Lobby } from './components/Lobby'
-import type { HexCoord, TurnPlan } from './types'
-import { MAX_TURNS, HOST_ROLE } from './types'
+import type { HexCoord, TurnPlan, MatchSettings } from './types'
+import { resolveMatchSettings } from './lib/matchConfig'
+import type { LobbySettings } from './lib/matchConfig'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -29,11 +30,11 @@ function StatusScreen({ message }: { message: string }) {
   )
 }
 
-function WaitingForPartner({ roomCode }: { roomCode: string }) {
+function WaitingForPartner({ roomCode, opponentRole }: { roomCode: string; opponentRole: string }) {
   const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-6">
-      <h2 className="text-2xl font-semibold">Waiting for Evader…</h2>
+      <h2 className="text-2xl font-semibold">Waiting for {opponentRole}…</h2>
       <p className="text-neutral-400 text-sm">Share this link with your opponent:</p>
       <div className="flex gap-2 items-center">
         <code className="bg-neutral-800 px-4 py-2 rounded-lg text-neutral-200 text-sm select-all">
@@ -95,26 +96,27 @@ function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema): DraftP
 function GameView({
   roomCode,
   playerRole,
+  settings,
 }: {
   roomCode: string
   playerRole: 1 | 2
+  settings: MatchSettings | null
 }) {
   const { gameState, status, errorMsg, waitingForPartner, submitPlan } =
-    useHexGame(roomCode, playerRole)
+    useHexGame(roomCode, playerRole, settings)
 
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
 
-  const isChaser = (HOST_ROLE === 'chaser') === (playerRole === 1)
-
   const handleHexClick = useCallback((hex: HexCoord) => {
     setDraft(prev => {
       if (!gameState) return prev
+      const isChaser = gameState.settings.chaserPlayer === playerRole
       const roleKey = isChaser ? 'chaser' : 'evader'
       const schema = gameState.turnSchema[roleKey]
       return applyClick(prev, hex, schema)
     })
-  }, [gameState, isChaser])
+  }, [gameState, playerRole])
 
   const handleConfirm = useCallback((plan: TurnPlan) => {
     submitPlan(plan)
@@ -132,12 +134,17 @@ function GameView({
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
   if (status === 'disconnected')        return <StatusScreen message="Your opponent disconnected." />
-  if (status === 'waiting_for_partner') return <WaitingForPartner roomCode={roomCode} />
+  if (status === 'waiting_for_partner') {
+    const opponentRole = gameState?.settings.chaserPlayer === playerRole ? 'Evader' : 'Chaser'
+    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
+  }
   if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
   if (!gameState)                       return <StatusScreen message="Loading…" />
 
-  const myPos            = isChaser ? gameState.chaserPos    : gameState.evaderPos
-  const opponentPos      = isChaser ? gameState.evaderPos    : gameState.chaserPos
+  const isChaser     = gameState.settings.chaserPlayer === playerRole
+  const maxTurns     = gameState.settings.maxTurns
+  const myPos        = isChaser ? gameState.chaserPos    : gameState.evaderPos
+  const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
   const roleKey          = isChaser ? 'chaser' : 'evader'
@@ -150,7 +157,7 @@ function GameView({
       <div className="flex items-center gap-4 flex-wrap justify-center">
         <h1 className="text-2xl font-bold tracking-tight">Hex Tag</h1>
         <span className="text-neutral-500 text-sm">
-          Turn {Math.min(gameState.turn, MAX_TURNS)} / {MAX_TURNS}
+          Turn {Math.min(gameState.turn, maxTurns)} / {maxTurns}
         </span>
         <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
           isChaser
@@ -204,6 +211,7 @@ function GameView({
           <PlanningPanel
             isChaser={isChaser}
             turn={gameState.turn}
+            maxTurns={maxTurns}
             phase={gameState.phase}
             schema={schema}
             currentStep={currentStep}
@@ -221,22 +229,22 @@ function GameView({
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-type RoomInfo = { code: string; role: 1 | 2 }
+type RoomInfo = { code: string; role: 1 | 2; settings: MatchSettings | null }
 
 export default function App() {
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(() => {
     const code = new URLSearchParams(window.location.search).get('room')
-    return code ? { code: code.toUpperCase(), role: 2 } : null
+    return code ? { code: code.toUpperCase(), role: 2, settings: null } : null
   })
 
-  const handleCreateGame = useCallback(() => {
+  const handleCreateGame = useCallback((lobby: LobbySettings) => {
     const code = generateRoomCode()
     const url = new URL(window.location.href)
     url.searchParams.set('room', code)
     history.replaceState(null, '', url.toString())
-    setRoomInfo({ code, role: 1 })
+    setRoomInfo({ code, role: 1, settings: resolveMatchSettings(lobby) })
   }, [])
 
   if (!roomInfo) return <Lobby onCreateGame={handleCreateGame} />
-  return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} />
+  return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} settings={roomInfo.settings} />
 }
