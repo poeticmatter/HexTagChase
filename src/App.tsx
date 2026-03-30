@@ -4,8 +4,8 @@ import { HexBoard } from './components/HexBoard'
 import { PlanningPanel } from './components/PlanningPanel'
 import type { DraftPlan, PlanningPhase } from './components/PlanningPanel'
 import { Lobby } from './components/Lobby'
-import type { HexCoord, TurnPlan, GameSettings } from './types'
-import { TOKENS_NEEDED } from './lib/hexGameLogic'
+import type { HexCoord, TurnPlan } from './types'
+import { MAX_TURNS, HOST_ROLE } from './types'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -53,34 +53,25 @@ function WaitingForPartner({ roomCode }: { roomCode: string }) {
 // ── Planning state helpers ────────────────────────────────────────────────────
 
 const EMPTY_DRAFT: DraftPlan = {
-  moveStep1: null,
-  moveStep2: null,
-  predictStep1: null,
-  predictStep2: null,
+  moveDest: null,
+  predictDest: null,
   bonusMove: null,
 }
 
-function nextPhase(draft: DraftPlan, settings: GameSettings, isChaser: boolean): PlanningPhase {
-  const useStep2 = settings.moveSteps === 2 && settings.predictionTarget !== 'destination'
-  if (!draft.moveStep1) return 'move_step1'
-  if (useStep2 && !draft.moveStep2) return 'move_step2'
-  if (!draft.predictStep1) return 'predict_step1'
-  if (useStep2 && !draft.predictStep2) return 'predict_step2'
-  const needsBonus = settings.predictionOutcome === 'bonus-both'
-    || (settings.predictionOutcome === 'freeze-and-bonus' && !isChaser)
-  if (needsBonus && !draft.bonusMove) return 'bonus_move'
+function nextPhase(draft: DraftPlan): PlanningPhase {
+  if (!draft.moveDest) return 'move_dest'
+  if (!draft.predictDest) return 'predict_dest'
+  if (!draft.bonusMove) return 'bonus_move'
   return 'ready'
 }
 
-function applyClick(draft: DraftPlan, hex: HexCoord, settings: GameSettings, isChaser: boolean): DraftPlan {
-  const phase = nextPhase(draft, settings, isChaser)
+function applyClick(draft: DraftPlan, hex: HexCoord): DraftPlan {
+  const phase = nextPhase(draft)
   switch (phase) {
-    case 'move_step1':    return { ...draft, moveStep1: hex }
-    case 'move_step2':    return { ...draft, moveStep2: hex }
-    case 'predict_step1': return { ...draft, predictStep1: hex }
-    case 'predict_step2': return { ...draft, predictStep2: hex }
-    case 'bonus_move':    return { ...draft, bonusMove: hex }
-    case 'ready':         return draft
+    case 'move_dest':    return { ...draft, moveDest: hex }
+    case 'predict_dest': return { ...draft, predictDest: hex }
+    case 'bonus_move':   return { ...draft, bonusMove: hex }
+    case 'ready':        return draft
   }
 }
 
@@ -89,28 +80,25 @@ function applyClick(draft: DraftPlan, hex: HexCoord, settings: GameSettings, isC
 function GameView({
   roomCode,
   playerRole,
-  hostSettings,
 }: {
   roomCode: string
   playerRole: 1 | 2
-  hostSettings?: GameSettings
 }) {
   const { gameState, status, errorMsg, waitingForPartner, submitPlan } =
-    useHexGame(roomCode, playerRole, hostSettings)
+    useHexGame(roomCode, playerRole)
 
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
 
-  const hostRole = gameState?.settings.hostRole ?? hostSettings?.hostRole ?? 'chaser'
-  const isChaser = (hostRole === 'chaser') === (playerRole === 1)
+  const isChaser = (HOST_ROLE === 'chaser') === (playerRole === 1)
 
   const handleHexClick = useCallback((hex: HexCoord) => {
     setDraft(prev => {
       // gameState is guaranteed non-null when the board is interactive
       if (!gameState) return prev
-      return applyClick(prev, hex, gameState.settings, isChaser)
+      return applyClick(prev, hex)
     })
-  }, [gameState, isChaser])
+  }, [gameState])
 
   const handleConfirm = useCallback((plan: TurnPlan) => {
     submitPlan(plan)
@@ -132,27 +120,20 @@ function GameView({
   if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
   if (!gameState)                       return <StatusScreen message="Loading…" />
 
-  const gameSettings    = gameState.settings
-  const myPos           = isChaser ? gameState.chaserPos    : gameState.evaderPos
-  const opponentPos     = isChaser ? gameState.evaderPos    : gameState.chaserPos
-  const prevMyPath      = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
+  const myPos            = isChaser ? gameState.chaserPos    : gameState.evaderPos
+  const opponentPos      = isChaser ? gameState.evaderPos    : gameState.chaserPos
+  const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
-  const planningPhase   = nextPhase(draft, gameSettings, isChaser)
+  const planningPhase    = nextPhase(draft)
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
       {/* Header */}
       <div className="flex items-center gap-4 flex-wrap justify-center">
         <h1 className="text-2xl font-bold tracking-tight">Hex Tag</h1>
-        {gameSettings.evaderObjective === 'collect' ? (
-          <span className="text-neutral-500 text-sm">
-            Tokens {gameState.tokensCollected} / {TOKENS_NEEDED}
-          </span>
-        ) : (
-          <span className="text-neutral-500 text-sm">
-            Turn {Math.min(gameState.turn, gameSettings.maxTurns)} / {gameSettings.maxTurns}
-          </span>
-        )}
+        <span className="text-neutral-500 text-sm">
+          Turn {Math.min(gameState.turn, MAX_TURNS)} / {MAX_TURNS}
+        </span>
         <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
           isChaser
             ? 'bg-red-900/50 text-red-400 border-red-800'
@@ -180,13 +161,11 @@ function GameView({
         isChaser={isChaser}
         obstacles={gameState.obstacles}
         walls={gameState.walls}
-        collectibleTokens={gameState.collectibleTokens}
         showCoords={showCoords}
         planningPhase={planningPhase}
         draft={draft}
         waitingForPartner={waitingForPartner}
         winner={gameState.winner}
-        settings={gameSettings}
         onHexClick={handleHexClick}
       />
 
@@ -211,8 +190,6 @@ function GameView({
             planningPhase={planningPhase}
             lastResolution={gameState.lastResolution}
             waitingForPartner={waitingForPartner}
-            settings={gameSettings}
-            tokensCollected={gameState.tokensCollected}
             onConfirm={handleConfirm}
             onReset={handleReset}
           />
@@ -224,7 +201,7 @@ function GameView({
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-type RoomInfo = { code: string; role: 1 | 2; settings?: GameSettings }
+type RoomInfo = { code: string; role: 1 | 2 }
 
 export default function App() {
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(() => {
@@ -232,14 +209,14 @@ export default function App() {
     return code ? { code: code.toUpperCase(), role: 2 } : null
   })
 
-  const handleCreateGame = useCallback((settings: GameSettings) => {
+  const handleCreateGame = useCallback(() => {
     const code = generateRoomCode()
     const url = new URL(window.location.href)
     url.searchParams.set('room', code)
     history.replaceState(null, '', url.toString())
-    setRoomInfo({ code, role: 1, settings })
+    setRoomInfo({ code, role: 1 })
   }, [])
 
   if (!roomInfo) return <Lobby onCreateGame={handleCreateGame} />
-  return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} hostSettings={roomInfo.settings} />
+  return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} />
 }

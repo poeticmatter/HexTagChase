@@ -1,24 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
-import type { GameState, TurnPlan, ConnectionStatus, GameSettings } from '../types'
-import { DEFAULT_SETTINGS } from '../types'
-import { getInitialPositions, generateObstacles, generateWalls, resolveRound, COLLECTIBLE_TOKENS } from '../lib/hexGameLogic'
+import type { GameState, TurnPlan, ConnectionStatus } from '../types'
+import { getInitialPositions, generateObstacles, generateWalls, resolveRound } from '../lib/hexGameLogic'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
 
-function buildInitialState(settings: GameSettings): GameState {
+function buildInitialState(): GameState {
   const { chaserPos, evaderPos } = getInitialPositions()
-  const { gridType, obstacleMode, evaderObjective } = settings
 
-  const obstacles = (obstacleMode === 'hexes' || obstacleMode === 'both')
-    ? generateObstacles(chaserPos, evaderPos, gridType, evaderObjective === 'collect' ? COLLECTIBLE_TOKENS : [])
-    : []
-
-  const walls = (obstacleMode === 'walls' || obstacleMode === 'both')
-    ? generateWalls(chaserPos, evaderPos, obstacles, gridType, obstacleMode === 'walls' ? 4 : 2)
-    : []
+  const obstacles = generateObstacles(chaserPos, evaderPos)
+  const walls = generateWalls(chaserPos, evaderPos, obstacles)
 
   return {
     chaserPos,
@@ -33,13 +26,10 @@ function buildInitialState(settings: GameSettings): GameState {
     p1Plan: null,
     p2Plan: null,
     lastResolution: null,
-    settings,
-    collectibleTokens: evaderObjective === 'collect' ? [...COLLECTIBLE_TOKENS] : [],
-    tokensCollected: 0,
   }
 }
 
-export function useHexGame(roomCode: string, playerRole: 1 | 2, hostSettings?: GameSettings) {
+export function useHexGame(roomCode: string, playerRole: 1 | 2) {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
@@ -76,7 +66,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, hostSettings?: G
     const onError = (msg: string) => { setErrorMsg(msg); setStatus('error') }
 
     if (playerRole === 1) {
-      syncState(buildInitialState(hostSettings ?? DEFAULT_SETTINGS))
+      syncState(buildInitialState())
       peer.on('open', () => setStatus('waiting_for_partner'))
 
       peer.on('connection', (conn: DataConnection) => {
@@ -136,7 +126,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, hostSettings?: G
       live.current.conn?.close()
       peer.destroy()
     }
-  }, [roomCode, playerRole, syncState, resolveRoundAndSync])  // hostSettings intentionally excluded — fixed at session start
+  }, [roomCode, playerRole, syncState, resolveRoundAndSync])
 
   const submitPlan = useCallback((plan: TurnPlan) => {
     if (playerRole === 1) {
