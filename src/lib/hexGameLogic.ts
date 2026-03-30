@@ -503,9 +503,26 @@ export function processPhase(
 
 function getMoveDestOrNull(plan: TurnPlan | null): HexCoord | [HexCoord, HexCoord] | null {
   if (!plan) return null
-  if (plan.type === 'standard') return (plan as StandardPlan).moveDest
-  if (plan.type === 'line') return (plan as LinePlan).moveDest
-  return null
+  switch (plan.type) {
+    case 'standard': return plan.moveDest
+    case 'line': return plan.moveDest
+    case 'idle':
+    case 'declaration':
+    case 'reaction':
+      return null
+  }
+}
+
+function getBonusMoveOrNull(plan: TurnPlan | null): HexCoord | null {
+  if (!plan) return null
+  switch (plan.type) {
+    case 'standard': return plan.bonusMove || null
+    case 'line': return plan.bonusMove || null
+    case 'idle': return plan.bonusMove || null
+    case 'declaration':
+    case 'reaction':
+      return null
+  }
 }
 
 function _resolveRound(
@@ -531,22 +548,32 @@ function _resolveRound(
   )
 
   // 2. Determine Predictions Hits
-  const getMoveDest = (plan: TurnPlan) => {
-    if (plan.type === 'standard') return (plan as StandardPlan).moveDest
-    if (plan.type === 'line') return (plan as LinePlan).moveDest[0]
-    return null
+  const getSingleMoveDest = (plan: TurnPlan): HexCoord | null => {
+    switch (plan.type) {
+      case 'standard': return plan.moveDest
+      case 'line': return plan.moveDest[0]
+      case 'idle':
+      case 'declaration':
+      case 'reaction':
+        return null
+    }
   }
-  const getPredDest = (plan: TurnPlan) => {
-    if (plan.type === 'standard') return (plan as StandardPlan).predictDest
-    if (plan.type === 'line') return (plan as LinePlan).predictDest
-    if (plan.type === 'idle') return (plan as IdlePlan).predictDest
-    return null
+
+  const getPredDest = (plan: TurnPlan): HexCoord | null => {
+    switch (plan.type) {
+      case 'standard': return plan.predictDest
+      case 'line': return plan.predictDest
+      case 'idle': return plan.predictDest
+      case 'declaration':
+      case 'reaction':
+        return null
+    }
   }
 
   const p1Pred = getPredDest(p1Plan)
-  const p2Move = getMoveDest(p2Plan)
+  const p2Move = getSingleMoveDest(p2Plan)
   const p2Pred = getPredDest(p2Plan)
-  const p1Move = getMoveDest(p1Plan)
+  const p1Move = getSingleMoveDest(p1Plan)
 
   const chaserPredHit = p1Pred && p2Move && p1Pred.q === p2Move.q && p1Pred.r === p2Move.r
   const evaderPredHit = p2Pred && p1Move && p2Pred.q === p1Move.q && p2Pred.r === p1Move.r
@@ -572,30 +599,28 @@ function _resolveRound(
   let newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
 
   // 4. Bonus Calculation
-  let chaserBonusAllowed = chaserStrat.onBonusCalculation(
+  const chaserBonusResult = chaserStrat.onBonusCalculation(
     { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan, predHit: !!chaserPredHit, oppPredHit: !!evaderPredHit },
     !!chaserPredHit
   )
 
-  let evaderBonusAllowed = evaderStrat.onBonusCalculation(
+  const evaderBonusResult = evaderStrat.onBonusCalculation(
     { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan, predHit: !!evaderPredHit, oppPredHit: !!chaserPredHit },
     !!evaderPredHit
   )
 
-  // Opponent nullification hooks (e.g. Declarer fulfilling but opponent predicted it)
-  if (chaserStrat.name === 'Declarer' && chaserBonusAllowed && evaderPredHit) {
-    // If the Chaser is Declarer and fulfilled it (chaserBonusAllowed is true)
-    // AND the Evader correctly predicted the Chaser's declared move,
-    // the Evader's bonus is explicitly nullified.
-    evaderBonusAllowed = false
-  }
-
-  if (evaderStrat.name === 'Declarer' && evaderBonusAllowed && chaserPredHit) {
+  let chaserBonusAllowed = chaserBonusResult.selfBonusAllowed
+  if (evaderBonusResult.nullifyOpponentBonus) {
     chaserBonusAllowed = false
   }
 
+  let evaderBonusAllowed = evaderBonusResult.selfBonusAllowed
+  if (chaserBonusResult.nullifyOpponentBonus) {
+    evaderBonusAllowed = false
+  }
+
   let chaserBonusUsed = false
-  const p1Bonus = (p1Plan as StandardPlan | LinePlan | IdlePlan).bonusMove
+  const p1Bonus = getBonusMoveOrNull(p1Plan)
   if (chaserBonusAllowed && p1Bonus) {
     if (hexDistance(newChaserPos.q, newChaserPos.r, p1Bonus.q, p1Bonus.r) === 1) {
       if (!baseBlocked.has(`${p1Bonus.q},${p1Bonus.r}`) && isPassable(newChaserPos, p1Bonus, baseWalls)) {
@@ -607,7 +632,7 @@ function _resolveRound(
   }
 
   let evaderBonusUsed = false
-  const p2Bonus = (p2Plan as StandardPlan | LinePlan | IdlePlan).bonusMove
+  const p2Bonus = getBonusMoveOrNull(p2Plan)
   if (evaderBonusAllowed && p2Bonus) {
     if (hexDistance(newEvaderPos.q, newEvaderPos.r, p2Bonus.q, p2Bonus.r) === 1) {
       if (!baseBlocked.has(`${p2Bonus.q},${p2Bonus.r}`) && isPassable(newEvaderPos, p2Bonus, baseWalls)) {

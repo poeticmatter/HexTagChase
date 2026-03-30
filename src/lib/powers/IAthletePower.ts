@@ -42,6 +42,11 @@ export interface BonusCalculationCtx {
   oppPredHit: boolean // true if the opponent's prediction was correct
 }
 
+export interface BonusResult {
+  selfBonusAllowed: boolean
+  nullifyOpponentBonus: boolean
+}
+
 import type { UIStep } from '../../types'
 
 export interface IAthletePower {
@@ -75,7 +80,7 @@ export interface IAthletePower {
   onBonusCalculation(
     ctx: BonusCalculationCtx,
     bonusAllowed: boolean
-  ): boolean
+  ): BonusResult
 
   /** Called at the end of the round to persist state (e.g., Idle adding a range buff). */
   onRoundEnd(state: GameState, role: Role, myPlan: TurnPlan): Modifier[]
@@ -119,8 +124,8 @@ export abstract class BasePower implements IAthletePower {
   onBonusCalculation(
     ctx: BonusCalculationCtx,
     bonusAllowed: boolean
-  ): boolean {
-    return bonusAllowed
+  ): BonusResult {
+    return { selfBonusAllowed: bonusAllowed, nullifyOpponentBonus: false }
   }
 
   onRoundEnd(state: GameState, role: Role, myPlan: TurnPlan): Modifier[] {

@@ -1,4 +1,4 @@
-import { BasePower, PathExecutionCtx, BonusCalculationCtx } from './IAthletePower'
+import { BasePower, PathExecutionCtx, BonusCalculationCtx, BonusResult } from './IAthletePower'
 import type { PowerName, LinePlan, HexCoord } from '../../types'
 import { hexDistance, isOnBoard, HEX_DIRECTIONS } from '../hexGrid'
 
@@ -45,7 +45,9 @@ export class LinePower extends BasePower {
   override onBonusCalculation(
     ctx: BonusCalculationCtx,
     bonusAllowed: boolean
-  ): boolean {
+  ): BonusResult {
+    let selfBonusAllowed = bonusAllowed
+
     const { myPlan, oppPlan } = ctx
     if (myPlan.type === 'line' && (oppPlan.type === 'standard' || oppPlan.type === 'line' || oppPlan.type === 'idle')) {
       const linePlan = myPlan as LinePlan
@@ -56,15 +58,12 @@ export class LinePower extends BasePower {
         const p1Hit = oppPred.q === dest1.q && oppPred.r === dest1.r
         const p2Hit = oppPred.q === dest2.q && oppPred.r === dest2.r
 
-        // "If the opponent predicted either hex, the Line player is still guaranteed their standard bonus move."
-        // This means that even if the normal rules (e.g., missed prediction) would deny the bonus,
-        // getting hit explicitly *guarantees* it.
         if (p1Hit || p2Hit) {
-          return true
+          selfBonusAllowed = true
         }
       }
     }
-    return bonusAllowed
+    return { selfBonusAllowed, nullifyOpponentBonus: false }
   }
 }
 
