@@ -378,7 +378,7 @@ export function reachableDestinations(
  * Returns the first unblocked neighbor of start that is also a neighbor of destination,
  * or the destination itself if it is 1 step away.
  */
-export function findIntermediateCell(
+function findIntermediateCell(
   start: HexCoord,
   destination: HexCoord,
   blocked: Set<string>,
@@ -413,7 +413,7 @@ export function findIntermediateCell(
  * Destination may be 1 or 2 steps away.
  * Returns the sequence of positions actually visited (not including start).
  */
-export function executePath(
+function executePath(
   startPos: HexCoord,
   targetDest: HexCoord,
   blocked: Set<string>,

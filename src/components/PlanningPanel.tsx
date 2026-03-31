@@ -7,7 +7,7 @@ export interface DraftPlan {
 }
 
 /** select_bonus is optional — the player may confirm without choosing a bonus hex. */
-export function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
+function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
   for (const step of schema.requiredSteps) {
     if (step === 'select_movement' && !draft.moveDest) return false
     if (step === 'select_prediction' && !draft.predictDest) return false
@@ -16,7 +16,7 @@ export function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
   return true
 }
 
-export function draftToTurnPlan(
+function draftToTurnPlan(
   draft: DraftPlan,
   schema: TurnSchema,
   turn: number,
