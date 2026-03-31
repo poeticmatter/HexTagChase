@@ -1,4 +1,4 @@
-import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, GamePhase, Role } from '../types'
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, GamePhase } from '../types'
 
 export interface DraftPlan {
   moveDest: HexCoord | null
@@ -37,7 +37,7 @@ export function draftToTurnPlan(
       phase,
       moveDest: draft.moveDest,
       predictDest: draft.predictDest,
-      bonusMove: draft.bonusMove ?? undefined,
+      ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
     }
   }
 
@@ -47,7 +47,7 @@ export function draftToTurnPlan(
     turn,
     phase,
     moveDest: draft.moveDest,
-    bonusMove: draft.bonusMove ?? undefined,
+    ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
   }
 }
 
@@ -223,7 +223,7 @@ export function PlanningPanel({
               : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'
           }`}
         >
-          Confirm
+          {currentStep === 'select_bonus' && draft.bonusMove === null ? 'Skip Bonus' : 'Confirm'}
         </button>
       </div>
     </div>
