@@ -10,8 +10,6 @@ export interface WallCoord {
 
 export type Role = 'chaser' | 'evader'
 
-export const OBSTACLE_MODE = 'both'
-
 export type BonusTiming = 'pre-commit' | 'post-reveal'
 
 export interface MatchSettings {
