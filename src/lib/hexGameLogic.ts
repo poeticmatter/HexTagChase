@@ -505,7 +505,7 @@ function _resolveRound(state: GameState): GameState {
 
   let bonusUsedBy: Role | null = null
 
-  if (chaserPredHit && p1Plan.bonusMove) {
+  if (chaserPredHit && p1Plan.bonusMove != null) {
     const from = chaserPath.at(-1) ?? state.chaserPos
     const bm = p1Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
@@ -514,7 +514,7 @@ function _resolveRound(state: GameState): GameState {
       chaserPath.push(bm)
       bonusUsedBy = 'chaser'
     }
-  } else if (!chaserPredHit && p2Plan.bonusMove) {
+  } else if (!chaserPredHit && p2Plan.bonusMove != null) {
     const from = evaderPath.at(-1) ?? state.evaderPos
     const bm = p2Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
@@ -633,7 +633,7 @@ function _applyBonusAndFinish(state: GameState): GameState {
 
   let bonusUsedBy: Role | null = null
 
-  if (bonusPlan?.bonusMove) {
+  if (bonusPlan && bonusPlan.bonusMove != null) {
     const bm = bonusPlan.bonusMove
     if (entitledRole === 'chaser') {
       if (hexDistance(state.chaserPos.q, state.chaserPos.r, bm.q, bm.r) === 1
