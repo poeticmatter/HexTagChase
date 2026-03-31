@@ -1,11 +1,13 @@
 import { motion } from 'motion/react'
-import type { HexCoord, WallCoord } from '../types'
+import type { HexCoord, WallCoord, Role, PowerName, GameState } from '../types'
 import {
   hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS,
 } from '../lib/hexGrid'
 import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
 import type { DraftPlan } from './PlanningPanel'
-import type { UIStep, TurnSchema, GameState } from '../types'
+import type { UIStep, TurnSchema } from '../types'
+import type { ReachableDestinationsCtx } from '../lib/powers/IAthletePower'
+import { getPowerStrategy } from '../lib/powers/PowerFactory'
 
 const HEX_SIZE = 38
 const PADDING  = 30
@@ -74,24 +76,35 @@ function getValidTargets(
   opponentPos: HexCoord,
   obstacles: HexCoord[],
   walls: Set<string>,
+  gameState: GameState,
+  myRole: Role,
+  myPowerName: PowerName,
+  oppPowerName: PowerName,
 ): Set<string> {
   const blocked = obstacleSet(obstacles)
+  const oppRole: Role = myRole === 'chaser' ? 'evader' : 'chaser'
 
   switch (currentStep) {
     case 'select_declaration':
-    case 'select_movement_1':
-      // Technically, we should call onReachableDestinationsRequest, but UI is currently dumb.
-      // We will just use the base reachable logic for now, or you can expand this to use the actual hooks
-      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
+    case 'select_movement_1': {
+      const strategy = getPowerStrategy(myPowerName)
+      const baseDestinations = reachableDestinations(myPos, blocked, walls)
+      const ctx: ReachableDestinationsCtx = { state: gameState, pos: myPos, role: myRole, blocked, walls }
+      return new Set(strategy.onReachableDestinationsRequest(ctx, baseDestinations).map(hexKey))
+    }
     case 'select_movement_2': {
       if (!draft.moveDest1) return new Set()
       // Line ability's second movement step: from moveDest1
       return new Set(validNeighbors(draft.moveDest1, blocked, walls).map(hexKey))
     }
-    case 'select_prediction':
-      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
+    case 'select_prediction': {
+      const strategy = getPowerStrategy(oppPowerName)
+      const baseDestinations = reachableDestinations(opponentPos, blocked, walls)
+      const ctx: ReachableDestinationsCtx = { state: gameState, pos: opponentPos, role: oppRole, blocked, walls }
+      return new Set(strategy.onReachableDestinationsRequest(ctx, baseDestinations).map(hexKey))
+    }
     case 'select_bonus': {
-      // Bonus move starts from the final destination (moveDest1 or moveDest2)
+      // Bonus is always a standard 1-step move from the final destination; power hooks are not applied
       const finalDest = draft.moveDest2 || draft.moveDest1
       if (!finalDest) return new Set()
       return new Set(validNeighbors(finalDest, blocked, walls).map(hexKey))
@@ -133,6 +146,9 @@ interface Props {
   winner: 'chaser' | 'evader' | null
   showCoords: boolean
   opponentUnmaskedDests: HexCoord[]
+  gameState: GameState
+  myPowerName: PowerName
+  oppPowerName: PowerName
   onHexClick: (hex: HexCoord) => void
 }
 
@@ -150,6 +166,9 @@ export function HexBoard({
   winner,
   showCoords,
   opponentUnmaskedDests,
+  gameState,
+  myPowerName,
+  oppPowerName,
   onHexClick,
 }: Props) {
   const { width: svgWidth, height: svgHeight, offsetX, offsetY } = boardDimensions()
@@ -157,8 +176,9 @@ export function HexBoard({
 
   const obstacleKeys = obstacleSet(obstacles)
   const wallKeys = buildWallSet(walls)
+  const myRole: Role = isChaser ? 'chaser' : 'evader'
   const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys)
+    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys, gameState, myRole, myPowerName, oppPowerName)
     : new Set<string>()
 
   const movePathKeys  = new Set<string>()

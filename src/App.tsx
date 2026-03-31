@@ -210,6 +210,9 @@ function GameView({
         waitingForPartner={effectiveWaiting}
         winner={gameState.winner}
         opponentUnmaskedDests={opponentUnmaskedDests}
+        gameState={gameState}
+        myPowerName={myPowerName}
+        oppPowerName={oppPowerName}
         onHexClick={handleHexClick}
       />
 
