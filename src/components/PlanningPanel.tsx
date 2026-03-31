@@ -36,7 +36,8 @@ export function draftToTurnPlan(draft: DraftPlan, schema: TurnSchema, turn: numb
     return { type: 'reaction', executeMove: draft.reactionExecute!, turn, phase }
   }
   if (schema.requiredSteps.includes('idle_confirmation')) {
-    return { type: 'idle', moveDest: null, predictDest: draft.predictDest!, bonusMove: draft.bonusMove || undefined, turn, phase }
+    // Idle skips movement; prediction is not collected — sentinel ensures no prediction match.
+    return { type: 'idle', moveDest: null, predictDest: draft.predictDest ?? undefined, bonusMove: draft.bonusMove ?? undefined, turn, phase }
   }
   if (schema.requiredSteps.includes('select_movement_2')) {
     return { type: 'line', moveDest: [draft.moveDest1!, draft.moveDest2!], predictDest: draft.predictDest!, bonusMove: draft.bonusMove || undefined, turn, phase }
@@ -212,6 +213,7 @@ interface Props {
   oppPowerName: PowerName
   onConfirm: (plan: TurnPlan) => void
   onReset: () => void
+  onReactionChoice: (executeMove: boolean) => void
 }
 
 export function PlanningPanel({
@@ -228,6 +230,7 @@ export function PlanningPanel({
   oppPowerName,
   onConfirm,
   onReset,
+  onReactionChoice,
 }: Props) {
   const steps = buildSteps(draft, schema, currentStep)
   const role = isChaser ? 'Chaser' : 'Evader'
@@ -285,6 +288,36 @@ export function PlanningPanel({
           </div>
         ))}
       </div>
+
+      {currentStep === 'select_reaction' && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-neutral-400 text-center">
+            Opponent's move is highlighted. React:
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onReactionChoice(false)}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors border ${
+                draft.reactionExecute === false
+                  ? 'bg-amber-700 border-amber-500 text-white'
+                  : 'bg-neutral-800 border-neutral-600 text-neutral-300 hover:bg-neutral-700'
+              }`}
+            >
+              Stay Put
+            </button>
+            <button
+              onClick={() => onReactionChoice(true)}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors border ${
+                draft.reactionExecute === true
+                  ? 'bg-blue-700 border-blue-500 text-white'
+                  : 'bg-neutral-800 border-neutral-600 text-neutral-300 hover:bg-neutral-700'
+              }`}
+            >
+              Execute Move
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2">
         <button

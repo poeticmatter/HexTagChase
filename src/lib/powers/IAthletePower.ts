@@ -5,6 +5,7 @@ import type {
   Role,
   PowerName,
   Modifier,
+  PlayerTurnData,
 } from '../../types'
 
 export interface ReachableDestinationsCtx {
@@ -20,6 +21,8 @@ export interface BeforeMoveExecutionCtx {
   role: Role
   myPlan: TurnPlan
   oppPlan: TurnPlan
+  myTurnData: PlayerTurnData
+  oppTurnData: PlayerTurnData
 }
 
 export interface PathExecutionCtx {

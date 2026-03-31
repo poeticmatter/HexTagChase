@@ -132,6 +132,7 @@ interface Props {
   waitingForPartner: boolean
   winner: 'chaser' | 'evader' | null
   showCoords: boolean
+  opponentUnmaskedDests: HexCoord[]
   onHexClick: (hex: HexCoord) => void
 }
 
@@ -148,6 +149,7 @@ export function HexBoard({
   waitingForPartner,
   winner,
   showCoords,
+  opponentUnmaskedDests,
   onHexClick,
 }: Props) {
   const { width: svgWidth, height: svgHeight, offsetX, offsetY } = boardDimensions()
@@ -164,6 +166,7 @@ export function HexBoard({
   if (draft.moveDest2) movePathKeys.add(hexKey(draft.moveDest2))
   const predPathKeys  = new Set(draft.predictDest ? [hexKey(draft.predictDest)] : [])
   const bonusPathKeys = new Set(draft.bonusMove ? [hexKey(draft.bonusMove)] : [])
+  const unmaskedDestKeys = new Set(opponentUnmaskedDests.map(hexKey))
 
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
   const opponentColor = isChaser ? '#3b82f6' : '#ef4444'
@@ -207,18 +210,21 @@ export function HexBoard({
           const isMovePath = movePathKeys.has(key)
           const isPredPath = predPathKeys.has(key)
           const isBonusPath = bonusPathKeys.has(key)
+          const isUnmaskedDest = unmaskedDestKeys.has(key)
 
           let fill = '#1a1a1a'
-          if (isObstacle)        fill = '#2d1f1f'
-          else if (isValid)      fill = '#1e293b'
+          if (isObstacle)           fill = '#2d1f1f'
+          else if (isUnmaskedDest)  fill = '#292212'
+          else if (isValid)         fill = '#1e293b'
 
           let stroke = '#2a2a2a'
           let strokeWidth = 0.8
-          if (isObstacle)        { stroke = '#5a3030'; strokeWidth = 1 }
-          else if (isMovePath)   { stroke = myColor;   strokeWidth = 2 }
-          else if (isBonusPath)  { stroke = bonusColor; strokeWidth = 2 }
-          else if (isPredPath)   { stroke = '#a855f7'; strokeWidth = 2 }
-          else if (isValid)      { stroke = '#60a5fa'; strokeWidth = 1.5 }
+          if (isObstacle)           { stroke = '#5a3030'; strokeWidth = 1 }
+          else if (isUnmaskedDest)  { stroke = '#f59e0b'; strokeWidth = 2.5 }
+          else if (isMovePath)      { stroke = myColor;   strokeWidth = 2 }
+          else if (isBonusPath)     { stroke = bonusColor; strokeWidth = 2 }
+          else if (isPredPath)      { stroke = '#a855f7'; strokeWidth = 2 }
+          else if (isValid)         { stroke = '#60a5fa'; strokeWidth = 1.5 }
 
           return (
             <g key={key} style={{ cursor: isValid ? 'pointer' : 'default' }} onClick={() => isValid && onHexClick({ q, r })}>

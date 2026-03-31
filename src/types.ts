@@ -54,7 +54,7 @@ export interface LinePlan extends BasePlan {
 export interface IdlePlan extends BasePlan {
   type: 'idle'
   moveDest: null
-  predictDest: HexCoord
+  predictDest?: HexCoord
   bonusMove?: HexCoord
 }
 
@@ -102,10 +102,13 @@ export interface TransientContext {
   evaderDeclaration?: HexCoord | null
   chaserUnmaskedMove?: HexCoord | [HexCoord, HexCoord] | null // For Juke Reacting phase
   evaderUnmaskedMove?: HexCoord | [HexCoord, HexCoord] | null
-  chaserPlanningPlan?: TurnPlan | null
-  evaderPlanningPlan?: TurnPlan | null
-  chaserReactionPlan?: TurnPlan | null
-  evaderReactionPlan?: TurnPlan | null
+}
+
+/** Aggregates all plans submitted across a single turn's phases. */
+export interface PlayerTurnData {
+  declaration?: TurnPlan
+  planning?: TurnPlan
+  reaction?: TurnPlan
 }
 
 export interface ResolutionSummary {
@@ -137,8 +140,8 @@ export interface GameState {
   transientContext: TransientContext
   turnSchema: Record<Role, TurnSchema>
 
-  p1Plan: TurnPlan | null
-  p2Plan: TurnPlan | null
+  p1TurnData: PlayerTurnData
+  p2TurnData: PlayerTurnData
   lastResolution: ResolutionSummary | null
 }
 

@@ -1,10 +1,17 @@
 import { BasePower, ReachableDestinationsCtx } from './IAthletePower'
-import type { GameState, Role, TurnPlan, Modifier, PowerName, HexCoord } from '../../types'
+import type { GameState, Role, TurnPlan, Modifier, PowerName, HexCoord, GamePhase, UIStep } from '../../types'
 import { validNeighbors, reachableDestinations } from '../hexGameLogic'
 
 export class IdlePower extends BasePower {
   readonly name: PowerName = 'Idle'
   readonly description = 'You may skip your move this turn. Doing so grants you range-3 movement on your next turn, letting you reach hexes two steps further than normal.'
+
+  override getRequiredSteps(phase: GamePhase): UIStep[] {
+    if (phase === 'planning') {
+      return ['idle_confirmation']
+    }
+    return []
+  }
 
   override onReachableDestinationsRequest(
     ctx: ReachableDestinationsCtx,

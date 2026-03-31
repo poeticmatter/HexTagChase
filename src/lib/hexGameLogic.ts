@@ -1,4 +1,4 @@
-import type { HexCoord, WallCoord, GameState, TurnPlan, ResolutionSummary } from '../types'
+import type { HexCoord, WallCoord, GameState, TurnPlan, ResolutionSummary, PlayerTurnData } from '../types'
 import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
@@ -444,57 +444,57 @@ export function processPhase(
   const chaserStrat = getPowerStrategy(state.chaserPower)
   const evaderStrat = getPowerStrategy(state.evaderPower)
 
-  let nextState = { ...state, transientContext: { ...state.transientContext } }
-
-  // Inject default "skip" plans for empty schemas if they weren't provided.
-  // The orchestrator may pass null if the player wasn't required to submit anything.
-  const resolvedP1Plan = p1Plan || { type: 'standard', turn: state.turn, phase: state.phase } as TurnPlan
-  const resolvedP2Plan = p2Plan || { type: 'standard', turn: state.turn, phase: state.phase } as TurnPlan
+  let nextState = {
+    ...state,
+    transientContext: { ...state.transientContext },
+    p1TurnData: { ...state.p1TurnData },
+    p2TurnData: { ...state.p2TurnData },
+  }
 
   if (state.phase === 'declaring') {
-    if (resolvedP1Plan.type === 'declaration') {
-      nextState.transientContext.chaserDeclaration = resolvedP1Plan.declaredDest
+    // Store declarations into composite turn data
+    if (p1Plan && p1Plan.type === 'declaration') {
+      nextState.p1TurnData = { ...nextState.p1TurnData, declaration: p1Plan }
+      nextState.transientContext.chaserDeclaration = p1Plan.declaredDest
     }
-    if (resolvedP2Plan.type === 'declaration') {
-      nextState.transientContext.evaderDeclaration = resolvedP2Plan.declaredDest
+    if (p2Plan && p2Plan.type === 'declaration') {
+      nextState.p2TurnData = { ...nextState.p2TurnData, declaration: p2Plan }
+      nextState.transientContext.evaderDeclaration = p2Plan.declaredDest
     }
     nextState.phase = 'planning'
 
-    const turnSchema: GameState['turnSchema'] = {
+    nextState.turnSchema = {
       chaser: { requiredSteps: chaserStrat.getRequiredSteps(nextState.phase) },
       evader: { requiredSteps: evaderStrat.getRequiredSteps(nextState.phase) },
     }
-    nextState.turnSchema = turnSchema
     return nextState
 
   } else if (state.phase === 'planning') {
-    if (chaserStrat.requiresPhase('reacting') || evaderStrat.requiresPhase('reacting')) {
-      nextState.transientContext.chaserUnmaskedMove = getMoveDestOrNull(resolvedP1Plan)
-      nextState.transientContext.evaderUnmaskedMove = getMoveDestOrNull(resolvedP2Plan)
+    // Store planning plans into composite turn data
+    if (p1Plan) nextState.p1TurnData = { ...nextState.p1TurnData, planning: p1Plan }
+    if (p2Plan) nextState.p2TurnData = { ...nextState.p2TurnData, planning: p2Plan }
 
-      nextState.transientContext.chaserPlanningPlan = resolvedP1Plan
-      nextState.transientContext.evaderPlanningPlan = resolvedP2Plan
+    if (chaserStrat.requiresPhase('reacting') || evaderStrat.requiresPhase('reacting')) {
+      // Expose both players' move destinations so the reacting player can see them on the board
+      nextState.transientContext.chaserUnmaskedMove = p1Plan ? getMoveDestOrNull(p1Plan) : null
+      nextState.transientContext.evaderUnmaskedMove = p2Plan ? getMoveDestOrNull(p2Plan) : null
 
       nextState.phase = 'reacting'
-
-      const turnSchema: GameState['turnSchema'] = {
+      nextState.turnSchema = {
         chaser: { requiredSteps: chaserStrat.getRequiredSteps(nextState.phase) },
         evader: { requiredSteps: evaderStrat.getRequiredSteps(nextState.phase) },
       }
-      nextState.turnSchema = turnSchema
       return nextState
     } else {
-      return _resolveRound(nextState, resolvedP1Plan, resolvedP2Plan)
+      return _resolveRound(nextState)
     }
 
   } else if (state.phase === 'reacting') {
-    const p1PlanningPlan = state.transientContext.chaserPlanningPlan as TurnPlan
-    const p2PlanningPlan = state.transientContext.evaderPlanningPlan as TurnPlan
+    // Store reaction plans into composite turn data
+    if (p1Plan) nextState.p1TurnData = { ...nextState.p1TurnData, reaction: p1Plan }
+    if (p2Plan) nextState.p2TurnData = { ...nextState.p2TurnData, reaction: p2Plan }
 
-    nextState.transientContext.chaserReactionPlan = resolvedP1Plan
-    nextState.transientContext.evaderReactionPlan = resolvedP2Plan
-
-    return _resolveRound(nextState, p1PlanningPlan, p2PlanningPlan)
+    return _resolveRound(nextState)
   }
 
   return nextState
@@ -524,12 +524,20 @@ function getBonusMoveOrNull(plan: TurnPlan | null): HexCoord | null {
   }
 }
 
-function _resolveRound(
-  state: GameState,
-  p1Plan: TurnPlan,
-  p2Plan: TurnPlan,
-): GameState {
-  const { chaserPos, evaderPos, obstacles, walls, turn, chaserPower, evaderPower } = state
+function _resolveRound(state: GameState): GameState {
+  // Planning plans are the canonical movement plans — always populated from the planning phase.
+  // Reaction plans (if any) inform power hooks via the composite turn data.
+  const p1Plan = state.p1TurnData.planning
+  const p2Plan = state.p2TurnData.planning
+
+  if (!p1Plan || !p2Plan) {
+    // Both planning plans must be present before resolution can proceed.
+    // This is a logic error — processPhase should never call _resolveRound without them.
+    console.error('_resolveRound called without both planning plans', state.p1TurnData, state.p2TurnData)
+    return state
+  }
+
+  const { chaserPos, evaderPos, obstacles, walls, chaserPower, evaderPower } = state
   const baseBlocked = obstacleSet(obstacles)
   const baseWalls = buildWallSet(walls)
 
@@ -538,11 +546,11 @@ function _resolveRound(
 
   // 1. Evaluate pre-movement
   let chaserExecutes = chaserStrat.onBeforeMoveExecution(
-    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan },
+    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan, myTurnData: state.p1TurnData, oppTurnData: state.p2TurnData },
     true
   )
   let evaderExecutes = evaderStrat.onBeforeMoveExecution(
-    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan },
+    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan, myTurnData: state.p2TurnData, oppTurnData: state.p1TurnData },
     true
   )
 
@@ -562,7 +570,7 @@ function _resolveRound(
     switch (plan.type) {
       case 'standard': return plan.predictDest
       case 'line': return plan.predictDest
-      case 'idle': return plan.predictDest
+      case 'idle': return plan.predictDest ?? null
       case 'declaration':
       case 'reaction':
         return null
@@ -660,7 +668,7 @@ function buildNextState(
   evaderPath: HexCoord[],
   resolution: ResolutionSummary,
   p1Plan: TurnPlan,
-  p2Plan: TurnPlan
+  p2Plan: TurnPlan,
 ): GameState {
   const { chaserPos, evaderPos, turn, chaserPower, evaderPower } = state
   const chaserStrat = getPowerStrategy(chaserPower)
@@ -700,6 +708,11 @@ function buildNextState(
     nextPhase = 'declaring'
   }
 
+  const nextTurnSchema: GameState['turnSchema'] = {
+    chaser: { requiredSteps: chaserStrat.getRequiredSteps(nextPhase) },
+    evader: { requiredSteps: evaderStrat.getRequiredSteps(nextPhase) },
+  }
+
   return {
     ...state,
     chaserPos: finalChaserPos,
@@ -709,10 +722,12 @@ function buildNextState(
     turn: turn + 1,
     phase: nextPhase,
     winner,
-    p1Plan: null,
-    p2Plan: null,
+    // Wipe composite turn data so no phantom inputs bleed into the next round
+    p1TurnData: {},
+    p2TurnData: {},
     modifiers,
-    transientContext: {}, // reset transient state for the next turn
+    turnSchema: nextTurnSchema,
+    transientContext: {},
     lastResolution: resolution,
   }
 }

@@ -44,8 +44,8 @@ function buildInitialState(settings: MatchSettings): GameState {
     modifiers: [],
     transientContext: {},
     turnSchema,
-    p1Plan: null,
-    p2Plan: null,
+    p1TurnData: {},
+    p2TurnData: {},
     lastResolution: null,
   }
 }
@@ -78,16 +78,21 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     const hostSchema = hostIsChaser ? current.turnSchema.chaser : current.turnSchema.evader
     const clientSchema = hostIsChaser ? current.turnSchema.evader : current.turnSchema.chaser
 
+    // A player with an empty schema for this phase has nothing to submit.
+    // Mark them as locally ready and pass null — the engine handles absent plans natively.
     const hostReady = hostSchema.requiredSteps.length === 0 || live.current.hostPendingPlan !== null
     const clientReady = clientSchema.requiredSteps.length === 0 || live.current.clientPendingPlan !== null
 
     if (hostReady && clientReady) {
-      const p1Plan = hostIsChaser ? live.current.hostPendingPlan : live.current.clientPendingPlan
-      const p2Plan = hostIsChaser ? live.current.clientPendingPlan : live.current.hostPendingPlan
+      // Pass null for any player whose schema was empty — no fake plans injected.
+      const hostPlan = hostSchema.requiredSteps.length === 0 ? null : live.current.hostPendingPlan
+      const clientPlan = clientSchema.requiredSteps.length === 0 ? null : live.current.clientPendingPlan
+
+      const p1Plan = hostIsChaser ? hostPlan : clientPlan
+      const p2Plan = hostIsChaser ? clientPlan : hostPlan
 
       const nextState = processPhase(current, p1Plan, p2Plan)
 
-      // Clear pending plans for the next phase
       live.current.hostPendingPlan = null
       live.current.clientPendingPlan = null
       setWaitingForPartner(false)

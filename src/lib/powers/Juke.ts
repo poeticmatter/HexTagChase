@@ -1,5 +1,5 @@
 import { BasePower, BeforeMoveExecutionCtx } from './IAthletePower'
-import type { GamePhase, PowerName, ReactionPlan } from '../../types'
+import type { GamePhase, PowerName, ReactionPlan, UIStep } from '../../types'
 
 export class JukePower extends BasePower {
   readonly name: PowerName = 'Juke'
@@ -9,18 +9,23 @@ export class JukePower extends BasePower {
     return phase === 'reacting'
   }
 
+  override getRequiredSteps(phase: GamePhase): UIStep[] {
+    if (phase === 'reacting') {
+      return ['select_reaction']
+    }
+    return super.getRequiredSteps(phase)
+  }
+
   override onBeforeMoveExecution(
     ctx: BeforeMoveExecutionCtx,
     executeMove: boolean
   ): boolean {
     if (!executeMove) return false
 
-    // The reacting plan is stored in transientContext because `myPlan` holds the original
-    // planning plan (which has the movement destination we are evaluating).
-    const reactionPlan = ctx.role === 'chaser'
-      ? ctx.state.transientContext.chaserReactionPlan
-      : ctx.state.transientContext.evaderReactionPlan
-
+    // Read the reaction decision directly from the composite turn data.
+    // myPlan holds the planning-phase plan (movement destination); the reaction
+    // is a separate phase submission stored in myTurnData.reaction.
+    const reactionPlan = ctx.myTurnData.reaction
     if (reactionPlan && reactionPlan.type === 'reaction') {
       return (reactionPlan as ReactionPlan).executeMove
     }

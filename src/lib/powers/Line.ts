@@ -1,10 +1,17 @@
 import { BasePower, PathExecutionCtx, BonusCalculationCtx, BonusResult } from './IAthletePower'
-import type { PowerName, LinePlan, HexCoord } from '../../types'
+import type { PowerName, LinePlan, HexCoord, GamePhase, UIStep } from '../../types'
 import { hexDistance, isOnBoard, HEX_DIRECTIONS } from '../hexGrid'
 
 export class LinePower extends BasePower {
   readonly name: PowerName = 'Line'
   readonly description = 'Choose two destination hexes. You automatically move to whichever one your opponent didn\'t predict. If they guess either one, you earn a bonus move.'
+
+  override getRequiredSteps(phase: GamePhase): UIStep[] {
+    if (phase === 'planning') {
+      return ['select_movement_1', 'select_movement_2', 'select_prediction', 'select_bonus']
+    }
+    return []
+  }
 
   // Line uses 2 hex targets. During execution, it moves to the one NOT predicted.
   // If both predicted or both missed, it defaults to the first one (or we define a tiebreaker).

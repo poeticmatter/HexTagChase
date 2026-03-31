@@ -1,5 +1,5 @@
 import { BasePower, BonusCalculationCtx, BonusResult } from './IAthletePower'
-import type { GamePhase, PowerName, StandardPlan } from '../../types'
+import type { GamePhase, PowerName, StandardPlan, UIStep } from '../../types'
 
 export class DeclarerPower extends BasePower {
   readonly name: PowerName = 'Declarer'
@@ -7,6 +7,13 @@ export class DeclarerPower extends BasePower {
 
   override requiresPhase(phase: GamePhase): boolean {
     return phase === 'declaring'
+  }
+
+  override getRequiredSteps(phase: GamePhase): UIStep[] {
+    if (phase === 'declaring') {
+      return ['select_declaration']
+    }
+    return super.getRequiredSteps(phase)
   }
 
   override onBonusCalculation(

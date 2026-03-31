@@ -126,10 +126,15 @@ function GameView({
     setDraft(EMPTY_DRAFT)
   }, [])
 
+  const handleReactionChoice = useCallback((executeMove: boolean) => {
+    setDraft(prev => ({ ...prev, reactionExecute: executeMove }))
+  }, [])
+
   // Reset draft whenever the turn advances (round resolved)
   useEffect(() => {
     setDraft(EMPTY_DRAFT)
   }, [gameState?.turn])
+
 
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
@@ -152,6 +157,17 @@ function GameView({
   const roleKey          = isChaser ? 'chaser' : 'evader'
   const schema           = gameState.turnSchema[roleKey]
   const currentStep      = getCurrentStep(draft, schema)
+
+  // Players with no steps this phase are handled natively by the engine.
+  const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
+
+  // Opponent's planned destination(s), revealed during the reacting phase for Juke.
+  const rawUnmasked = isChaser
+    ? gameState.transientContext.evaderUnmaskedMove
+    : gameState.transientContext.chaserUnmaskedMove
+  const opponentUnmaskedDests: HexCoord[] = rawUnmasked == null
+    ? []
+    : Array.isArray(rawUnmasked) ? rawUnmasked : [rawUnmasked]
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
@@ -191,8 +207,9 @@ function GameView({
         showCoords={showCoords}
         currentStep={currentStep}
         draft={draft}
-        waitingForPartner={waitingForPartner}
+        waitingForPartner={effectiveWaiting}
         winner={gameState.winner}
+        opponentUnmaskedDests={opponentUnmaskedDests}
         onHexClick={handleHexClick}
       />
 
@@ -219,11 +236,12 @@ function GameView({
             currentStep={currentStep}
             draft={draft}
             lastResolution={gameState.lastResolution}
-            waitingForPartner={waitingForPartner}
+            waitingForPartner={effectiveWaiting}
             myPowerName={myPowerName}
             oppPowerName={oppPowerName}
             onConfirm={handleConfirm}
             onReset={handleReset}
+            onReactionChoice={handleReactionChoice}
           />
         </div>
       )}
