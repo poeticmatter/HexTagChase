@@ -1,13 +1,11 @@
 import { motion } from 'motion/react'
-import type { HexCoord, WallCoord, Role, PowerName, GameState } from '../types'
+import type { HexCoord, WallCoord } from '../types'
 import {
   hexToPixel, hexPolygonPoints, getAllHexes, HEX_RADIUS,
 } from '../lib/hexGrid'
 import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
 import type { DraftPlan } from './PlanningPanel'
-import type { UIStep, TurnSchema } from '../types'
-import type { ReachableDestinationsCtx } from '../lib/powers/IAthletePower'
-import { getPowerStrategy } from '../lib/powers/PowerFactory'
+import type { UIStep } from '../types'
 
 const HEX_SIZE = 38
 const PADDING  = 30
@@ -30,10 +28,6 @@ function boardDimensions(): { width: number; height: number; offsetX: number; of
   return { width, height, offsetX: width / 2, offsetY: height / 2 }
 }
 
-function getAllCells(): HexCoord[] {
-  return getAllHexes()
-}
-
 /**
  * Returns the two pixel endpoints of the hex edge shared between adjacent cells (q1,r1)→(q2,r2).
  * Coordinates are relative to the board origin (before adding offsetX/offsetY).
@@ -47,7 +41,6 @@ function hexWallEdgePoints(
   const s = size
   const h = (Math.sqrt(3) / 2) * s
 
-  // Edge vertex offsets from the center of (q1,r1) for each hex direction
   const edgeOffsets: Record<string, [[number, number], [number, number]]> = {
     '0,-1':  [[-s / 2, -h], [s / 2, -h]],
     '1,-1':  [[s / 2, -h],  [s, 0]],
@@ -76,41 +69,19 @@ function getValidTargets(
   opponentPos: HexCoord,
   obstacles: HexCoord[],
   walls: Set<string>,
-  gameState: GameState,
-  myRole: Role,
-  myPowerName: PowerName,
-  oppPowerName: PowerName,
 ): Set<string> {
   const blocked = obstacleSet(obstacles)
-  const oppRole: Role = myRole === 'chaser' ? 'evader' : 'chaser'
 
   switch (currentStep) {
-    case 'select_declaration':
-    case 'select_movement_1': {
-      const strategy = getPowerStrategy(myPowerName)
-      const baseDestinations = reachableDestinations(myPos, blocked, walls)
-      const ctx: ReachableDestinationsCtx = { state: gameState, pos: myPos, role: myRole, blocked, walls }
-      return new Set(strategy.onReachableDestinationsRequest(ctx, baseDestinations).map(hexKey))
-    }
-    case 'select_movement_2': {
-      if (!draft.moveDest1) return new Set()
-      // Line ability's second movement step: from moveDest1
-      return new Set(validNeighbors(draft.moveDest1, blocked, walls).map(hexKey))
-    }
-    case 'select_prediction': {
-      const strategy = getPowerStrategy(oppPowerName)
-      const baseDestinations = reachableDestinations(opponentPos, blocked, walls)
-      const ctx: ReachableDestinationsCtx = { state: gameState, pos: opponentPos, role: oppRole, blocked, walls }
-      return new Set(strategy.onReachableDestinationsRequest(ctx, baseDestinations).map(hexKey))
-    }
+    case 'select_movement':
+      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
+    case 'select_prediction':
+      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
     case 'select_bonus': {
-      // Bonus is always a standard 1-step move from the final destination; power hooks are not applied
-      const finalDest = draft.moveDest2 || draft.moveDest1
-      if (!finalDest) return new Set()
-      return new Set(validNeighbors(finalDest, blocked, walls).map(hexKey))
+      // Bonus targets: 1 step from planned dest (pre-commit) or current pos (bonus_phase)
+      const fromPos = draft.moveDest ?? myPos
+      return new Set(validNeighbors(fromPos, blocked, walls).map(hexKey))
     }
-    case 'select_reaction':
-    case 'idle_confirmation':
     case 'ready':
       return new Set()
   }
@@ -137,6 +108,9 @@ interface Props {
   opponentPos: HexCoord
   prevMyPath: HexCoord[] | null
   prevOpponentPath: HexCoord[] | null
+  /** Committed movement paths for this turn (post-reveal bonus_phase display). */
+  committedMyPath: HexCoord[] | null
+  committedOpponentPath: HexCoord[] | null
   isChaser: boolean
   obstacles: HexCoord[]
   walls: WallCoord[]
@@ -145,10 +119,6 @@ interface Props {
   waitingForPartner: boolean
   winner: 'chaser' | 'evader' | null
   showCoords: boolean
-  opponentUnmaskedDests: HexCoord[]
-  gameState: GameState
-  myPowerName: PowerName
-  oppPowerName: PowerName
   onHexClick: (hex: HexCoord) => void
 }
 
@@ -157,6 +127,8 @@ export function HexBoard({
   opponentPos,
   prevMyPath,
   prevOpponentPath,
+  committedMyPath,
+  committedOpponentPath,
   isChaser,
   obstacles,
   walls,
@@ -165,28 +137,20 @@ export function HexBoard({
   waitingForPartner,
   winner,
   showCoords,
-  opponentUnmaskedDests,
-  gameState,
-  myPowerName,
-  oppPowerName,
   onHexClick,
 }: Props) {
   const { width: svgWidth, height: svgHeight, offsetX, offsetY } = boardDimensions()
-  const allCells = getAllCells()
+  const allCells = getAllHexes()
 
   const obstacleKeys = obstacleSet(obstacles)
   const wallKeys = buildWallSet(walls)
-  const myRole: Role = isChaser ? 'chaser' : 'evader'
   const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys, gameState, myRole, myPowerName, oppPowerName)
+    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys)
     : new Set<string>()
 
-  const movePathKeys  = new Set<string>()
-  if (draft.moveDest1) movePathKeys.add(hexKey(draft.moveDest1))
-  if (draft.moveDest2) movePathKeys.add(hexKey(draft.moveDest2))
+  const movePathKeys  = new Set(draft.moveDest ? [hexKey(draft.moveDest)] : [])
   const predPathKeys  = new Set(draft.predictDest ? [hexKey(draft.predictDest)] : [])
   const bonusPathKeys = new Set(draft.bonusMove ? [hexKey(draft.bonusMove)] : [])
-  const unmaskedDestKeys = new Set(opponentUnmaskedDests.map(hexKey))
 
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
   const opponentColor = isChaser ? '#3b82f6' : '#ef4444'
@@ -217,6 +181,12 @@ export function HexBoard({
           <marker id="arrow-last-opp" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
             <path d="M 0 0 L 6 3 L 0 6 Z" fill={opponentColor} fillOpacity="0.5" />
           </marker>
+          <marker id="arrow-committed-my" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill={myColor} />
+          </marker>
+          <marker id="arrow-committed-opp" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M 0 0 L 6 3 L 0 6 Z" fill={opponentColor} />
+          </marker>
         </defs>
 
         {/* Cells */}
@@ -230,21 +200,18 @@ export function HexBoard({
           const isMovePath = movePathKeys.has(key)
           const isPredPath = predPathKeys.has(key)
           const isBonusPath = bonusPathKeys.has(key)
-          const isUnmaskedDest = unmaskedDestKeys.has(key)
 
           let fill = '#1a1a1a'
-          if (isObstacle)           fill = '#2d1f1f'
-          else if (isUnmaskedDest)  fill = '#292212'
-          else if (isValid)         fill = '#1e293b'
+          if (isObstacle) fill = '#2d1f1f'
+          else if (isValid) fill = '#1e293b'
 
           let stroke = '#2a2a2a'
           let strokeWidth = 0.8
-          if (isObstacle)           { stroke = '#5a3030'; strokeWidth = 1 }
-          else if (isUnmaskedDest)  { stroke = '#f59e0b'; strokeWidth = 2.5 }
-          else if (isMovePath)      { stroke = myColor;   strokeWidth = 2 }
-          else if (isBonusPath)     { stroke = bonusColor; strokeWidth = 2 }
-          else if (isPredPath)      { stroke = '#a855f7'; strokeWidth = 2 }
-          else if (isValid)         { stroke = '#60a5fa'; strokeWidth = 1.5 }
+          if (isObstacle)       { stroke = '#5a3030'; strokeWidth = 1 }
+          else if (isMovePath)  { stroke = myColor;   strokeWidth = 2 }
+          else if (isBonusPath) { stroke = bonusColor; strokeWidth = 2 }
+          else if (isPredPath)  { stroke = '#a855f7'; strokeWidth = 2 }
+          else if (isValid)     { stroke = '#60a5fa'; strokeWidth = 1.5 }
 
           return (
             <g key={key} style={{ cursor: isValid ? 'pointer' : 'default' }} onClick={() => isValid && onHexClick({ q, r })}>
@@ -289,21 +256,15 @@ export function HexBoard({
           )
         })}
 
-        {/* Move path arrow(s) */}
-        {draft.moveDest1 && (() => {
-          const { x1, y1, x2, y2 } = pp(myPos, draft.moveDest1)
-          return <line x1={x1} y1={y1} x2={x2} y2={y2}
-            stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
-            markerEnd="url(#arrow-move)" />
-        })()}
-        {draft.moveDest2 && draft.moveDest1 && (() => {
-          const { x1, y1, x2, y2 } = pp(draft.moveDest1, draft.moveDest2)
+        {/* Move path arrow */}
+        {draft.moveDest && (() => {
+          const { x1, y1, x2, y2 } = pp(myPos, draft.moveDest)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
             stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
             markerEnd="url(#arrow-move)" />
         })()}
 
-        {/* Prediction path arrow (purple dashed) */}
+        {/* Prediction path arrow (purple dashed, from opponent's current position) */}
         {draft.predictDest && (() => {
           const { x1, y1, x2, y2 } = pp(opponentPos, draft.predictDest)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
@@ -311,15 +272,36 @@ export function HexBoard({
             strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
         })()}
 
-        {/* Bonus move arrow (green dashed, from planned final pos) */}
+        {/* Bonus move arrow (green dashed, from planned dest or current pos in bonus_phase) */}
         {draft.bonusMove && (() => {
-          const fromPos = draft.moveDest2 || draft.moveDest1
-          if (!fromPos) return null
+          const fromPos = draft.moveDest ?? myPos
           const { x1, y1, x2, y2 } = pp(fromPos, draft.bonusMove)
           return <line x1={x1} y1={y1} x2={x2} y2={y2}
             stroke={bonusColor} strokeWidth={2} strokeOpacity={0.7}
             strokeDasharray="5 3" markerEnd="url(#arrow-bonus)" />
         })()}
+
+        {/* Committed movement paths (post-reveal bonus_phase: this turn's resolved moves) */}
+        {committedMyPath && committedMyPath.slice(0, -1).map((from, i) => {
+          const to = committedMyPath[i + 1]
+          const { x1, y1, x2, y2 } = pp(from, to)
+          const isLast = i === committedMyPath.length - 2
+          return (
+            <line key={`committed-my-${i}`} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={myColor} strokeWidth={2.5} strokeOpacity={0.7}
+              markerEnd={isLast ? 'url(#arrow-committed-my)' : undefined} />
+          )
+        })}
+        {committedOpponentPath && committedOpponentPath.slice(0, -1).map((from, i) => {
+          const to = committedOpponentPath[i + 1]
+          const { x1, y1, x2, y2 } = pp(from, to)
+          const isLast = i === committedOpponentPath.length - 2
+          return (
+            <line key={`committed-opp-${i}`} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={opponentColor} strokeWidth={2.5} strokeOpacity={0.7}
+              markerEnd={isLast ? 'url(#arrow-committed-opp)' : undefined} />
+          )
+        })}
 
         {/* Last-round movement arrows */}
         {prevMyPath && prevMyPath.slice(0, -1).map((from, i) => {

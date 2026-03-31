@@ -55,24 +55,16 @@ function WaitingForPartner({ roomCode, opponentRole }: { roomCode: string; oppon
 // ── Planning state helpers ────────────────────────────────────────────────────
 
 const EMPTY_DRAFT: DraftPlan = {
-  declaration: null,
-  moveDest1: null,
-  moveDest2: null,
+  moveDest: null,
   predictDest: null,
   bonusMove: null,
-  reactionExecute: null,
-  idleConfirmed: null,
 }
 
 function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' {
   for (const step of schema.requiredSteps) {
-    if (step === 'select_declaration' && !draft.declaration) return step
-    if (step === 'select_movement_1' && !draft.moveDest1) return step
-    if (step === 'select_movement_2' && !draft.moveDest2) return step
+    if (step === 'select_movement' && !draft.moveDest) return step
     if (step === 'select_prediction' && !draft.predictDest) return step
     if (step === 'select_bonus' && !draft.bonusMove) return step
-    if (step === 'select_reaction' && draft.reactionExecute === null) return step
-    if (step === 'idle_confirmation' && !draft.idleConfirmed) return step
   }
   return 'ready'
 }
@@ -80,14 +72,10 @@ function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' 
 function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema): DraftPlan {
   const step = getCurrentStep(draft, schema)
   switch (step) {
-    case 'select_declaration': return { ...draft, declaration: hex }
-    case 'select_movement_1':  return { ...draft, moveDest1: hex }
-    case 'select_movement_2':  return { ...draft, moveDest2: hex }
-    case 'select_prediction':  return { ...draft, predictDest: hex }
-    case 'select_bonus':       return { ...draft, bonusMove: hex }
-    case 'select_reaction':    return draft // Handle via buttons, not hex clicks
-    case 'idle_confirmation':  return draft // Handle via buttons
-    case 'ready':              return draft
+    case 'select_movement':   return { ...draft, moveDest: hex }
+    case 'select_prediction': return { ...draft, predictDest: hex }
+    case 'select_bonus':      return { ...draft, bonusMove: hex }
+    case 'ready':             return draft
   }
 }
 
@@ -126,15 +114,10 @@ function GameView({
     setDraft(EMPTY_DRAFT)
   }, [])
 
-  const handleReactionChoice = useCallback((executeMove: boolean) => {
-    setDraft(prev => ({ ...prev, reactionExecute: executeMove }))
-  }, [])
-
-  // Reset draft whenever the turn advances (round resolved)
+  // Reset draft on turn advance and on phase change (critical for post-reveal bonus_phase)
   useEffect(() => {
     setDraft(EMPTY_DRAFT)
-  }, [gameState?.turn])
-
+  }, [gameState?.turn, gameState?.phase])
 
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
@@ -148,8 +131,6 @@ function GameView({
 
   const isChaser     = gameState.settings.chaserPlayer === playerRole
   const maxTurns     = gameState.settings.maxTurns
-  const myPowerName  = isChaser ? gameState.settings.chaserPower : gameState.settings.evaderPower
-  const oppPowerName = isChaser ? gameState.settings.evaderPower : gameState.settings.chaserPower
   const myPos        = isChaser ? gameState.chaserPos    : gameState.evaderPos
   const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
@@ -161,13 +142,11 @@ function GameView({
   // Players with no steps this phase are handled natively by the engine.
   const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
 
-  // Opponent's planned destination(s), revealed during the reacting phase for Juke.
-  const rawUnmasked = isChaser
-    ? gameState.transientContext.evaderUnmaskedMove
-    : gameState.transientContext.chaserUnmaskedMove
-  const opponentUnmaskedDests: HexCoord[] = rawUnmasked == null
-    ? []
-    : Array.isArray(rawUnmasked) ? rawUnmasked : [rawUnmasked]
+  // Post-reveal bonus_phase: show committed movement paths for both players.
+  const committedChaserPath = gameState.transientContext.committedChaserPath ?? null
+  const committedEvaderPath = gameState.transientContext.committedEvaderPath ?? null
+  const committedMyPath       = isChaser ? committedChaserPath : committedEvaderPath
+  const committedOpponentPath = isChaser ? committedEvaderPath : committedChaserPath
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
@@ -201,6 +180,8 @@ function GameView({
         opponentPos={opponentPos}
         prevMyPath={prevMyPath}
         prevOpponentPath={prevOpponentPath}
+        committedMyPath={committedMyPath}
+        committedOpponentPath={committedOpponentPath}
         isChaser={isChaser}
         obstacles={gameState.obstacles}
         walls={gameState.walls}
@@ -209,10 +190,6 @@ function GameView({
         draft={draft}
         waitingForPartner={effectiveWaiting}
         winner={gameState.winner}
-        opponentUnmaskedDests={opponentUnmaskedDests}
-        gameState={gameState}
-        myPowerName={myPowerName}
-        oppPowerName={oppPowerName}
         onHexClick={handleHexClick}
       />
 
@@ -240,11 +217,8 @@ function GameView({
             draft={draft}
             lastResolution={gameState.lastResolution}
             waitingForPartner={effectiveWaiting}
-            myPowerName={myPowerName}
-            oppPowerName={oppPowerName}
             onConfirm={handleConfirm}
             onReset={handleReset}
-            onReactionChoice={handleReactionChoice}
           />
         </div>
       )}

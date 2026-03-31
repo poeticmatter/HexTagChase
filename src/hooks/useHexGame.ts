@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
-import { getInitialPositions, generateObstacles, generateWalls, processPhase } from '../lib/hexGameLogic'
-import { getPowerStrategy } from '../lib/powers/PowerFactory'
+import { getInitialPositions, generateObstacles, generateWalls, processPhase, buildPlanningSchema } from '../lib/hexGameLogic'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
@@ -10,23 +9,8 @@ type PeerMessage =
 
 function buildInitialState(settings: MatchSettings): GameState {
   const { chaserPos, evaderPos } = getInitialPositions()
-
   const obstacles = generateObstacles(chaserPos, evaderPos)
   const walls = generateWalls(chaserPos, evaderPos, obstacles)
-
-  const { chaserPower, evaderPower } = settings
-  const chaserStrat = getPowerStrategy(chaserPower)
-  const evaderStrat = getPowerStrategy(evaderPower)
-
-  let phase: GameState['phase'] = 'planning'
-  if (chaserStrat.requiresPhase('declaring') || evaderStrat.requiresPhase('declaring')) {
-    phase = 'declaring'
-  }
-
-  const turnSchema: GameState['turnSchema'] = {
-    chaser: { requiredSteps: chaserStrat.getRequiredSteps(phase) },
-    evader: { requiredSteps: evaderStrat.getRequiredSteps(phase) },
-  }
 
   return {
     settings,
@@ -34,16 +18,13 @@ function buildInitialState(settings: MatchSettings): GameState {
     evaderPos,
     prevChaserPath: null,
     prevEvaderPath: null,
-    phase,
+    phase: 'planning',
     turn: 1,
     winner: null,
     obstacles,
     walls,
-    chaserPower,
-    evaderPower,
-    modifiers: [],
     transientContext: {},
-    turnSchema,
+    turnSchema: buildPlanningSchema(settings),
     p1TurnData: {},
     p2TurnData: {},
     lastResolution: null,
@@ -79,12 +60,12 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     const clientSchema = hostIsChaser ? current.turnSchema.evader : current.turnSchema.chaser
 
     // A player with an empty schema for this phase has nothing to submit.
-    // Mark them as locally ready and pass null — the engine handles absent plans natively.
+    // In bonus_phase, exactly one player has an empty schema — the non-entitled player.
+    // This prevents the orchestrator from deadlocking waiting for them.
     const hostReady = hostSchema.requiredSteps.length === 0 || live.current.hostPendingPlan !== null
     const clientReady = clientSchema.requiredSteps.length === 0 || live.current.clientPendingPlan !== null
 
     if (hostReady && clientReady) {
-      // Pass null for any player whose schema was empty — no fake plans injected.
       const hostPlan = hostSchema.requiredSteps.length === 0 ? null : live.current.hostPendingPlan
       const clientPlan = clientSchema.requiredSteps.length === 0 ? null : live.current.clientPendingPlan
 
@@ -131,7 +112,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
           const current = live.current.state
           if (!current) return
 
-          // Implicit ACK validation: Discard packets from older states
+          // Implicit ACK validation: discard packets from older states
           if (msg.plan.turn !== current.turn || msg.plan.phase !== current.phase) {
             return
           }
@@ -185,7 +166,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       if (!current) return
 
       live.current.hostPendingPlan = plan
-      // Show waiting indicator if the execution trigger doesn't fire immediately
       setWaitingForPartner(true)
       checkExecutionTrigger()
     } else {

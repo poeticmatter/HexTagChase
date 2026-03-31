@@ -12,114 +12,76 @@ export type Role = 'chaser' | 'evader'
 
 export const OBSTACLE_MODE = 'both'
 
+export type BonusTiming = 'pre-commit' | 'post-reveal'
+
 export interface MatchSettings {
   maxTurns: number
   chaserPlayer: 1 | 2
-  chaserPower: PowerName
-  evaderPower: PowerName
+  bonusTiming: BonusTiming
 }
 
-export type PowerName =
-  | 'Standard'
-  | 'Vault'
-  | 'Juke'
-  | 'Line'
-  | 'Idle'
-  | 'Climber'
-  | 'Declarer'
+export type GamePhase = 'planning' | 'bonus_phase'
 
-export type GamePhase = 'declaring' | 'planning' | 'reacting' | 'resolving'
+// ── Asymmetric turn plans ─────────────────────────────────────────────────────
 
-// --- Discriminated Union for Turn Plans ---
-export interface BasePlan {
-  type: string
+/** Chaser's planning-phase plan: move + prediction + optional pre-committed bonus. */
+export interface ChaserPlan {
+  type: 'chaser'
   turn: number
   phase: GamePhase
-}
-
-export interface StandardPlan extends BasePlan {
-  type: 'standard'
   moveDest: HexCoord
   predictDest: HexCoord
   bonusMove?: HexCoord
 }
 
-export interface LinePlan extends BasePlan {
-  type: 'line'
-  moveDest: [HexCoord, HexCoord]
-  predictDest: HexCoord
+/** Evader's planning-phase plan: move only + optional pre-committed bonus. */
+export interface EvaderPlan {
+  type: 'evader'
+  turn: number
+  phase: GamePhase
+  moveDest: HexCoord
   bonusMove?: HexCoord
 }
 
-export interface IdlePlan extends BasePlan {
-  type: 'idle'
-  moveDest: null
-  predictDest?: HexCoord
-  bonusMove?: HexCoord
+/** Post-reveal bonus phase: the entitled player selects their bonus move (null = skip). */
+export interface BonusPlan {
+  type: 'bonus'
+  turn: number
+  phase: 'bonus_phase'
+  bonusMove: HexCoord | null
 }
 
-export interface DeclarationPlan extends BasePlan {
-  type: 'declaration'
-  declaredDest: HexCoord
-}
+export type TurnPlan = ChaserPlan | EvaderPlan | BonusPlan
 
-export interface ReactionPlan extends BasePlan {
-  type: 'reaction'
-  executeMove: boolean
-}
+// ── State machine & UI ────────────────────────────────────────────────────────
 
-export type TurnPlan =
-  | StandardPlan
-  | LinePlan
-  | IdlePlan
-  | DeclarationPlan
-  | ReactionPlan
-
-// --- State Machine & UI Data ---
 export type UIStep =
-  | 'select_declaration'
-  | 'select_movement_1'
-  | 'select_movement_2'
+  | 'select_movement'
   | 'select_prediction'
   | 'select_bonus'
-  | 'select_reaction'
-  | 'idle_confirmation'
 
 export interface TurnSchema {
   requiredSteps: UIStep[]
-  allowObstacleTargeting?: boolean
-  allowSelfTargeting?: boolean
-}
-
-export interface Modifier {
-  role: Role
-  effect: 'range_3' // Expand this as we add more status effects
-  expiresAtTurn: number
 }
 
 export interface TransientContext {
-  chaserDeclaration?: HexCoord | null
-  evaderDeclaration?: HexCoord | null
-  chaserUnmaskedMove?: HexCoord | [HexCoord, HexCoord] | null // For Juke Reacting phase
-  evaderUnmaskedMove?: HexCoord | [HexCoord, HexCoord] | null
+  /** post-reveal: which role submits the bonus plan in bonus_phase */
+  bonusEntitledRole?: Role
+  /** post-reveal: cached for bonus_phase resolution */
+  chaserPredHit?: boolean
+  /** post-reveal: committed movement paths (include start pos as first element) */
+  committedChaserPath?: HexCoord[] | null
+  committedEvaderPath?: HexCoord[] | null
 }
 
-/** Aggregates all plans submitted across a single turn's phases. */
 export interface PlayerTurnData {
-  declaration?: TurnPlan
   planning?: TurnPlan
-  reaction?: TurnPlan
+  bonus?: TurnPlan
 }
 
 export interface ResolutionSummary {
   chaserPredHit: boolean
-  evaderPredHit: boolean
-  chaserBonusUsed: boolean
-  evaderBonusUsed: boolean
-  chaserLineHit?: boolean // If the opponent predicted either of Line's hexes
-  evaderLineHit?: boolean
-  chaserMoveAborted?: boolean // Vault/Juke outcomes
-  evaderMoveAborted?: boolean
+  bonusUsedBy: Role | null
 }
 
 export interface GameState {
@@ -133,13 +95,8 @@ export interface GameState {
   winner: Role | null
   obstacles: HexCoord[]
   walls: WallCoord[]
-
-  chaserPower: PowerName
-  evaderPower: PowerName
-  modifiers: Modifier[]
   transientContext: TransientContext
   turnSchema: Record<Role, TurnSchema>
-
   p1TurnData: PlayerTurnData
   p2TurnData: PlayerTurnData
   lastResolution: ResolutionSummary | null
