@@ -546,11 +546,11 @@ function _resolveRound(state: GameState): GameState {
 
   // 1. Evaluate pre-movement
   let chaserExecutes = chaserStrat.onBeforeMoveExecution(
-    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan, myTurnData: state.p1TurnData, oppTurnData: state.p2TurnData },
+    { state, role: 'chaser', myPlan: p1Plan, oppPlan: p2Plan, myTurnData: state.p1TurnData, oppTurnData: state.p2TurnData, blocked: baseBlocked, walls: baseWalls },
     true
   )
   let evaderExecutes = evaderStrat.onBeforeMoveExecution(
-    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan, myTurnData: state.p2TurnData, oppTurnData: state.p1TurnData },
+    { state, role: 'evader', myPlan: p2Plan, oppPlan: p1Plan, myTurnData: state.p2TurnData, oppTurnData: state.p1TurnData, blocked: baseBlocked, walls: baseWalls },
     true
   )
 

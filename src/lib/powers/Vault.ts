@@ -1,7 +1,6 @@
 import { BasePower, BeforeMoveExecutionCtx, ReachableDestinationsCtx, PathExecutionCtx } from './IAthletePower'
 import type { HexCoord, PowerName, StandardPlan } from '../../types'
 import { hexDistance, isOnBoard, HEX_DIRECTIONS } from '../hexGrid'
-import { obstacleSet, buildWallSet } from '../hexGameLogic'
 
 export class VaultPower extends BasePower {
   readonly name: PowerName = 'Vault'
@@ -92,11 +91,9 @@ export class VaultPower extends BasePower {
 
     // Only apply the Vault penalty when the path actually crossed an obstacle
     const myPos = ctx.role === 'chaser' ? ctx.state.chaserPos : ctx.state.evaderPos
-    const blocked = obstacleSet(ctx.state.obstacles)
-    const walls = buildWallSet(ctx.state.walls)
-    const mid = findVaultIntermediate(myPos, moveDest, blocked, walls)
+    const mid = findVaultIntermediate(myPos, moveDest, ctx.blocked, ctx.walls)
 
-    const pathCrossedObstacle = mid !== null && blocked.has(`${mid.q},${mid.r}`)
+    const pathCrossedObstacle = mid !== null && ctx.blocked.has(`${mid.q},${mid.r}`)
     if (!pathCrossedObstacle) return executeMove
 
     if (moveDest.q === predictDest.q && moveDest.r === predictDest.r) {
@@ -137,14 +134,8 @@ function findVaultIntermediate(
     if (!isOnBoard(mid.q, mid.r)) continue
     if (!isWallPassable(start, mid, walls)) continue
 
-    const destIsAdjacentToMid = Object.values(HEX_DIRECTIONS).some(({ dq: dq2, dr: dr2 }) => {
-      const candidate = { q: mid.q + dq2, r: mid.r + dr2 }
-      return (
-        candidate.q === destination.q
-        && candidate.r === destination.r
-        && isWallPassable(mid, destination, walls)
-      )
-    })
+    const destIsAdjacentToMid = hexDistance(mid.q, mid.r, destination.q, destination.r) === 1
+      && isWallPassable(mid, destination, walls)
 
     if (!destIsAdjacentToMid) continue
 

@@ -23,6 +23,8 @@ export interface BeforeMoveExecutionCtx {
   oppPlan: TurnPlan
   myTurnData: PlayerTurnData
   oppTurnData: PlayerTurnData
+  blocked: Set<string>
+  walls: Set<string>
 }
 
 export interface PathExecutionCtx {
