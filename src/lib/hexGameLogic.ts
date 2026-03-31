@@ -593,14 +593,18 @@ function _resolveRound(state: GameState): GameState {
     ? executePath(evaderPos, p2Move, baseBlocked, baseWalls)
     : []
 
-  const chaserPath = chaserStrat.onPathExecution(
-    { state, role: 'chaser', startPos: chaserPos, targetDest: p1Move, blocked: baseBlocked, walls: baseWalls, myPlan: p1Plan, oppPlan: p2Plan },
-    defaultChaserPath
-  )
-  const evaderPath = evaderStrat.onPathExecution(
-    { state, role: 'evader', startPos: evaderPos, targetDest: p2Move, blocked: baseBlocked, walls: baseWalls, myPlan: p2Plan, oppPlan: p1Plan },
-    defaultEvaderPath
-  )
+  const chaserPath = chaserExecutes
+    ? chaserStrat.onPathExecution(
+        { state, role: 'chaser', startPos: chaserPos, targetDest: p1Move, blocked: baseBlocked, walls: baseWalls, myPlan: p1Plan, oppPlan: p2Plan },
+        defaultChaserPath
+      )
+    : []
+  const evaderPath = evaderExecutes
+    ? evaderStrat.onPathExecution(
+        { state, role: 'evader', startPos: evaderPos, targetDest: p2Move, blocked: baseBlocked, walls: baseWalls, myPlan: p2Plan, oppPlan: p1Plan },
+        defaultEvaderPath
+      )
+    : []
 
   let newChaserPos = chaserPath.length > 0 ? chaserPath[chaserPath.length - 1] : chaserPos
   let newEvaderPos = evaderPath.length > 0 ? evaderPath[evaderPath.length - 1] : evaderPos
