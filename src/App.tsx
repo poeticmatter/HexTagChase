@@ -144,40 +144,43 @@ function GameView({
     setDraft(EMPTY_DRAFT)
   }, [gameState?.turn, gameState?.phase])
 
+  // Derived values — computed before early returns so hook order stays stable.
+  const isChaser         = gameState?.settings.chaserPlayer === playerRole
+  const roleKey          = isChaser ? 'chaser' : 'evader'
+  const schema: TurnSchema = gameState?.turnSchema[roleKey] ?? { requiredSteps: [] }
+  const currentStep      = getCurrentStep(draft, schema)
+  // Players with no steps this phase are handled natively by the engine.
+  const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
+
+  const validTargets = useMemo(() => {
+    if (!gameState || effectiveWaiting || gameState.winner) return new Set<string>()
+    const myPos       = isChaser ? gameState.chaserPos : gameState.evaderPos
+    const opponentPos = isChaser ? gameState.evaderPos : gameState.chaserPos
+    const wallKeys    = buildWallSet(gameState.walls)
+    return getValidTargets(currentStep, draft, myPos, opponentPos, gameState.obstacles, wallKeys)
+  }, [gameState, effectiveWaiting, isChaser, currentStep, draft])
+
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
   if (status === 'disconnected')        return <StatusScreen message="Your opponent disconnected." />
   if (status === 'waiting_for_partner') {
-    const opponentRole = gameState?.settings.chaserPlayer === playerRole ? 'Evader' : 'Chaser'
+    const opponentRole = isChaser ? 'Evader' : 'Chaser'
     return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
   }
   if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
   if (!gameState)                       return <StatusScreen message="Loading…" />
 
-  const isChaser     = gameState.settings.chaserPlayer === playerRole
   const maxTurns     = gameState.settings.maxTurns
   const myPos        = isChaser ? gameState.chaserPos    : gameState.evaderPos
   const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
-  const roleKey          = isChaser ? 'chaser' : 'evader'
-  const schema           = gameState.turnSchema[roleKey]
-  const currentStep      = getCurrentStep(draft, schema)
-
-  // Players with no steps this phase are handled natively by the engine.
-  const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
 
   // Post-reveal bonus_phase: show committed movement paths for both players.
   const committedChaserPath = gameState.transientContext.committedChaserPath ?? null
   const committedEvaderPath = gameState.transientContext.committedEvaderPath ?? null
   const committedMyPath       = isChaser ? committedChaserPath : committedEvaderPath
   const committedOpponentPath = isChaser ? committedEvaderPath : committedChaserPath
-
-  const validTargets = useMemo(() => {
-    if (effectiveWaiting || gameState.winner) return new Set<string>()
-    const wallKeys = buildWallSet(gameState.walls)
-    return getValidTargets(currentStep, draft, myPos, opponentPos, gameState.obstacles, wallKeys)
-  }, [effectiveWaiting, gameState.winner, currentStep, draft, myPos, opponentPos, gameState.obstacles, gameState.walls])
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">

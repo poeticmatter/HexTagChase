@@ -181,6 +181,34 @@ function sideFacePts(cx: number, cy: number, elev: number, vIdx: number): string
   return `${ax},${ay_top} ${bx},${by_top} ${bx},${by_gnd} ${ax},${ay_gnd}`
 }
 
+// ── Depth heuristic ───────────────────────────────────────────────────────────
+
+/** Painter's Algorithm depth score: lower = further from viewer. */
+function tileDepth(q: number, r: number): number { return 2 * r + q }
+
+// ── Renderable queue ──────────────────────────────────────────────────────────
+
+type RenderableHex = {
+  type: 'hex'
+  q: number; r: number
+  depth: number
+}
+type RenderableWall = {
+  type: 'wall'
+  wall: WallCoord
+  depth: number
+}
+type RenderablePath = {
+  type: 'path'
+  from: HexCoord; to: HexCoord
+  depth: number
+  color: string; opacity: number
+  markerId: string | undefined
+  dash: string | undefined
+  keyStr: string
+}
+type Renderable = RenderableHex | RenderableWall | RenderablePath
+
 // ── Wall geometry ─────────────────────────────────────────────────────────────
 
 const HEX_H = (Math.sqrt(3) / 2) * HEX_SIZE
@@ -246,9 +274,6 @@ export function HexBoard({
 }: Props) {
   const { width, height, offsetX, offsetY } = boardDimensions()
 
-  // Sort back-to-front: smaller (2r + q) is further from the viewer
-  const sortedCells = getAllHexes().sort((a, b) => (2 * a.r + a.q) - (2 * b.r + b.q))
-
   const obstacleKeys = obstacleSet(obstacles)
 
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
@@ -262,40 +287,190 @@ export function HexBoard({
     return { x: cx, y: cy - elev }
   }
 
-  function pathArrow(
-    from: HexCoord, to: HexCoord,
-    color: string, opacity: number, markerId: string, dash?: string,
+  // ── Build unified render queue ───────────────────────────────────────────────
+
+  const allHexes = getAllHexes().sort((a, b) => tileDepth(a.q, a.r) - tileDepth(b.q, b.r))
+  const renderQueue: Renderable[] = []
+
+  for (const { q, r } of allHexes) {
+    renderQueue.push({ type: 'hex', q, r, depth: tileDepth(q, r) })
+  }
+
+  for (const wall of walls) {
+    const depth = Math.max(tileDepth(wall.q1, wall.r1), tileDepth(wall.q2, wall.r2)) + 0.1
+    renderQueue.push({ type: 'wall', wall, depth })
+  }
+
+  // Path segments as flat decals resting on the hex surfaces.
+  // Depth = max endpoint depth + 0.05: renders after both tiles but before
+  // any wall at the same position (+0.1), so walls correctly cap visible paths.
+  function enqueuePathSegments(
+    path: HexCoord[], color: string, opacity: number,
+    markerId: string, keyPrefix: string,
   ) {
+    path.slice(0, -1).forEach((from, i) => {
+      const to = path[i + 1]
+      renderQueue.push({
+        type: 'path', from, to,
+        depth: Math.max(tileDepth(from.q, from.r), tileDepth(to.q, to.r)) + 0.05,
+        color, opacity,
+        markerId: i === path.length - 2 ? markerId : undefined,
+        dash: undefined,
+        keyStr: `${keyPrefix}-${i}`,
+      })
+    })
+  }
+
+  function enqueueSingleArrow(
+    from: HexCoord, to: HexCoord,
+    color: string, opacity: number,
+    markerId: string, dash: string | undefined,
+    keyStr: string,
+  ) {
+    renderQueue.push({
+      type: 'path', from, to,
+      depth: Math.max(tileDepth(from.q, from.r), tileDepth(to.q, to.r)) + 0.05,
+      color, opacity, markerId, dash, keyStr,
+    })
+  }
+
+  if (committedMyPath)       enqueuePathSegments(committedMyPath,       myColor,       0.85, 'arrow-commit-my',  'cm')
+  if (committedOpponentPath) enqueuePathSegments(committedOpponentPath, opponentColor, 0.85, 'arrow-commit-opp', 'co')
+  if (prevMyPath)            enqueuePathSegments(prevMyPath,            myColor,       0.30, 'arrow-last-my',    'pm')
+  if (prevOpponentPath)      enqueuePathSegments(prevOpponentPath,      opponentColor, 0.30, 'arrow-last-opp',   'po')
+
+  if (draft.moveDest)
+    enqueueSingleArrow(myPos, draft.moveDest, myColor, 0.85, 'arrow-move', undefined, 'draft-move')
+
+  if (draft.predictDest)
+    enqueueSingleArrow(opponentPos, draft.predictDest, '#a855f7', 0.65, 'arrow-pred', '5 3', 'draft-pred')
+
+  if (draft.bonusMove)
+    enqueueSingleArrow(draft.moveDest ?? myPos, draft.bonusMove, bonusColor, 0.75, 'arrow-bonus', '5 3', 'draft-bonus')
+
+  renderQueue.sort((a, b) => a.depth - b.depth)
+
+  // ── JSX renderers for each Renderable type ───────────────────────────────────
+
+  function renderHex({ q, r }: RenderableHex) {
+    const key = `hex-${q},${r}`
+    const coordKey = `${q},${r}`
+    const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
+    const isObstacle  = obstacleKeys.has(coordKey)
+    const isValid     = validTargets.has(coordKey)
+    const isMovePick  = !!(draft.moveDest    && hexKey(draft.moveDest)    === coordKey)
+    const isBonusPick = !!(draft.bonusMove   && hexKey(draft.bonusMove)   === coordKey)
+    const isPredPick  = !!(draft.predictDest && hexKey(draft.predictDest) === coordKey)
+
+    const elev = tileElevation(q, r, isObstacle)
+
+    let topColor = tileTopColor(q, r, isObstacle)
+    if (isValid)                   topColor = '#5d9ab5'
+    if (isMovePick || isBonusPick) topColor = '#3d9e6a'
+    if (isPredPick)                topColor = '#8b5cc4'
+
+    const sideR = darken(topColor, 0.68)
+    const sideB = darken(topColor, 0.55)
+    const sideL = darken(topColor, 0.63)
+
+    let topStroke = 'none'
+    let topStrokeW = 0
+    if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
+    if (isMovePick || isBonusPick) { topStroke = '#6edba0'; topStrokeW = 1.5 }
+    if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
+
+    return (
+      <g
+        key={key}
+        style={{ cursor: isValid ? 'pointer' : 'default' }}
+        onClick={() => isValid && onHexClick({ q, r })}
+      >
+        {/* Three viewer-facing side faces (right → bottom → left) */}
+        <polygon points={sideFacePts(cx, cy, elev, 0)} fill={sideR} />
+        <polygon points={sideFacePts(cx, cy, elev, 1)} fill={sideB} />
+        <polygon points={sideFacePts(cx, cy, elev, 2)} fill={sideL} />
+
+        {/* Top face */}
+        <polygon
+          points={topFacePts(cx, cy, elev, HEX_SIZE)}
+          fill={topColor}
+          stroke={topStroke}
+          strokeWidth={topStrokeW}
+        />
+
+        {/* Directional light overlay — same shape, gradient fill */}
+        <polygon
+          points={topFacePts(cx, cy, elev, HEX_SIZE)}
+          fill="url(#face-light)"
+          style={{ pointerEvents: 'none' }}
+        />
+
+        {/* Edge highlights: upper edges catch light (vertices 3→4→5→0) */}
+        {(() => {
+          const v = topFaceCoords(cx, cy, elev, HEX_SIZE)
+          const hi = [3, 4, 5, 0].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
+          const sh = [0, 1, 2, 3].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
+          return (
+            <>
+              <polyline points={hi} fill="none" stroke="white" strokeWidth={0.9} strokeOpacity={0.30} strokeLinecap="round" style={{ pointerEvents: 'none' }} />
+              <polyline points={sh} fill="none" stroke="black" strokeWidth={0.9} strokeOpacity={0.20} strokeLinecap="round" style={{ pointerEvents: 'none' }} />
+            </>
+          )
+        })()}
+
+        {/* Moss / seaweed in edge cracks — only on plain, non-interactive tiles */}
+        {!isObstacle && !isValid && !isMovePick && !isBonusPick && !isPredPick
+          && mossEdgeAccents(cx, cy, elev, q, r)}
+
+        {showCoords && (
+          <text
+            x={cx} y={cy - elev + 1}
+            textAnchor="middle" dominantBaseline="middle"
+            fontSize={9} fontWeight="600"
+            fill={isObstacle ? '#c4a898' : '#d4cec8'}
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            {q},{r}
+          </text>
+        )}
+      </g>
+    )
+  }
+
+  function renderWall({ wall: { q1, r1, q2, r2 } }: RenderableWall) {
+    const elev1 = tileElevation(q1, r1, obstacleKeys.has(`${q1},${r1}`))
+    const elev2 = tileElevation(q2, r2, obstacleKeys.has(`${q2},${r2}`))
+    // Sit the wall on the higher of the two adjacent tile surfaces
+    const elev = Math.max(elev1, elev2)
+    const e = wallEdgeIso(q1, r1, q2, r2, elev, offsetX, offsetY)
+    if (!e) return null
+    return (
+      <g key={`wall-${q1},${r1}|${q2},${r2}`} style={{ pointerEvents: 'none' }}>
+        {/* Shadow line below */}
+        <line x1={e.x1} y1={e.y1 + 2} x2={e.x2} y2={e.y2 + 2}
+          stroke="#1a0808" strokeWidth={5} strokeLinecap="round" strokeOpacity={0.55} />
+        {/* Main wall ridge */}
+        <line x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
+          stroke="#8b3333" strokeWidth={4} strokeLinecap="round" />
+        {/* Highlight on top edge */}
+        <line x1={e.x1} y1={e.y1 - 1.5} x2={e.x2} y2={e.y2 - 1.5}
+          stroke="#cc5555" strokeWidth={1.5} strokeLinecap="round" />
+      </g>
+    )
+  }
+
+  function renderPath({ from, to, color, opacity, markerId, dash, keyStr }: RenderablePath) {
     const a = tileSurface(from.q, from.r)
     const b = tileSurface(to.q, to.r)
     return (
       <line
+        key={keyStr}
         x1={a.x} y1={a.y} x2={b.x} y2={b.y}
         stroke={color} strokeWidth={2.5} strokeOpacity={opacity}
         strokeDasharray={dash}
-        markerEnd={`url(#${markerId})`}
+        markerEnd={markerId ? `url(#${markerId})` : undefined}
       />
     )
-  }
-
-  function pathSegments(
-    path: HexCoord[], color: string, opacity: number,
-    markerId: string, keyPrefix: string,
-  ) {
-    return path.slice(0, -1).map((from, i) => {
-      const to = path[i + 1]
-      const a  = tileSurface(from.q, from.r)
-      const b  = tileSurface(to.q, to.r)
-      const isLast = i === path.length - 2
-      return (
-        <line
-          key={`${keyPrefix}-${i}`}
-          x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-          stroke={color} strokeWidth={2.5} strokeOpacity={opacity}
-          markerEnd={isLast ? `url(#${markerId})` : undefined}
-        />
-      )
-    })
   }
 
   return (
@@ -355,8 +530,9 @@ export function HexBoard({
         ── Cast shadows (pre-pass, before all tiles) ──
         Each tile casts a dark offset polygon onto the water below it.
         Shadow offset grows with elevation so taller rocks cast longer shadows.
+        Uses allHexes (already depth-sorted) so shadow order matches tile order.
       */}
-      {sortedCells.map(({ q, r }) => {
+      {allHexes.map(({ q, r }) => {
         const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
         const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`))
         const sdx = 2 + elev * 0.20
@@ -367,148 +543,12 @@ export function HexBoard({
         return <polygon key={`sh-${q},${r}`} points={pts} fill="#000d1a" opacity={0.30} />
       })}
 
-      {/* ── Hex tiles (back to front) ── */}
-      {sortedCells.map(({ q, r }) => {
-        const key = `${q},${r}`
-        const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
-        const isObstacle = obstacleKeys.has(key)
-        const isValid    = validTargets.has(key)
-        const isMovePick  = !!(draft.moveDest    && hexKey(draft.moveDest)    === key)
-        const isBonusPick = !!(draft.bonusMove   && hexKey(draft.bonusMove)   === key)
-        const isPredPick  = !!(draft.predictDest && hexKey(draft.predictDest) === key)
-
-        const elev = tileElevation(q, r, isObstacle)
-
-        let topColor = tileTopColor(q, r, isObstacle)
-        if (isValid)                  topColor = '#5d9ab5'
-        if (isMovePick || isBonusPick) topColor = '#3d9e6a'
-        if (isPredPick)                topColor = '#8b5cc4'
-
-        const sideR = darken(topColor, 0.68)
-        const sideB = darken(topColor, 0.55)
-        const sideL = darken(topColor, 0.63)
-
-        let topStroke = 'none'
-        let topStrokeW = 0
-        if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
-        if (isMovePick || isBonusPick) { topStroke = '#6edba0'; topStrokeW = 1.5 }
-        if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
-
-        return (
-          <g
-            key={key}
-            style={{ cursor: isValid ? 'pointer' : 'default' }}
-            onClick={() => isValid && onHexClick({ q, r })}
-          >
-            {/* Three viewer-facing side faces (right → bottom → left) */}
-            <polygon points={sideFacePts(cx, cy, elev, 0)} fill={sideR} />
-            <polygon points={sideFacePts(cx, cy, elev, 1)} fill={sideB} />
-            <polygon points={sideFacePts(cx, cy, elev, 2)} fill={sideL} />
-
-            {/* Top face */}
-            <polygon
-              points={topFacePts(cx, cy, elev, HEX_SIZE)}
-              fill={topColor}
-              stroke={topStroke}
-              strokeWidth={topStrokeW}
-            />
-
-            {/* Directional light overlay — same shape, gradient fill */}
-            <polygon
-              points={topFacePts(cx, cy, elev, HEX_SIZE)}
-              fill="url(#face-light)"
-              style={{ pointerEvents: 'none' }}
-            />
-
-            {/* Edge highlights: upper edges catch light (vertices 3→4→5→0) */}
-            {(() => {
-              const v = topFaceCoords(cx, cy, elev, HEX_SIZE)
-              const hi = [3, 4, 5, 0].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
-              const sh = [0, 1, 2, 3].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
-              return (
-                <>
-                  <polyline points={hi} fill="none" stroke="white" strokeWidth={0.9} strokeOpacity={0.30} strokeLinecap="round" style={{ pointerEvents: 'none' }} />
-                  <polyline points={sh} fill="none" stroke="black" strokeWidth={0.9} strokeOpacity={0.20} strokeLinecap="round" style={{ pointerEvents: 'none' }} />
-                </>
-              )
-            })()}
-
-            {/* Moss / seaweed in edge cracks — only on plain, non-interactive tiles */}
-            {!isObstacle && !isValid && !isMovePick && !isBonusPick && !isPredPick
-              && mossEdgeAccents(cx, cy, elev, q, r)}
-
-            {showCoords && (
-              <text
-                x={cx} y={cy - elev + 1}
-                textAnchor="middle" dominantBaseline="middle"
-                fontSize={9} fontWeight="600"
-                fill={isObstacle ? '#c4a898' : '#d4cec8'}
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                {q},{r}
-              </text>
-            )}
-          </g>
-        )
+      {/* ── Unified render queue (hex tiles + walls + path arrows, back to front) ── */}
+      {renderQueue.map(item => {
+        if (item.type === 'hex')  return renderHex(item)
+        if (item.type === 'wall') return renderWall(item)
+        return renderPath(item)
       })}
-
-      {/*
-        ── Walls ──
-        Rendered as flat edge lines sitting on the tile surface rather than
-        3D quads — quads cause Z-fighting and topological intersections at
-        shared vertices. Three stacked lines give the illusion of a raised ridge.
-      */}
-      {walls.map(({ q1, r1, q2, r2 }) => {
-        const elev1 = tileElevation(q1, r1, obstacleKeys.has(`${q1},${r1}`))
-        const elev2 = tileElevation(q2, r2, obstacleKeys.has(`${q2},${r2}`))
-        // Sit the wall on the higher of the two adjacent tile surfaces
-        const elev = Math.max(elev1, elev2)
-        const e = wallEdgeIso(q1, r1, q2, r2, elev, offsetX, offsetY)
-        if (!e) return null
-        return (
-          <g key={`wall-${q1},${r1}>${q2},${r2}`} style={{ pointerEvents: 'none' }}>
-            {/* Shadow line below */}
-            <line x1={e.x1} y1={e.y1 + 2} x2={e.x2} y2={e.y2 + 2}
-              stroke="#1a0808" strokeWidth={5} strokeLinecap="round" strokeOpacity={0.55} />
-            {/* Main wall ridge */}
-            <line x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
-              stroke="#8b3333" strokeWidth={4} strokeLinecap="round" />
-            {/* Highlight on top edge */}
-            <line x1={e.x1} y1={e.y1 - 1.5} x2={e.x2} y2={e.y2 - 1.5}
-              stroke="#cc5555" strokeWidth={1.5} strokeLinecap="round" />
-          </g>
-        )
-      })}
-
-      {/* ── Path arrows ── */}
-
-      {draft.moveDest && pathArrow(myPos, draft.moveDest, myColor, 0.85, 'arrow-move')}
-
-      {draft.predictDest && (() => {
-        const a = tileSurface(opponentPos.q, opponentPos.r)
-        const b = tileSurface(draft.predictDest.q, draft.predictDest.r)
-        return (
-          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke="#a855f7" strokeWidth={2} strokeOpacity={0.65}
-            strokeDasharray="5 3" markerEnd="url(#arrow-pred)" />
-        )
-      })()}
-
-      {draft.bonusMove && (() => {
-        const from = draft.moveDest ?? myPos
-        const a = tileSurface(from.q, from.r)
-        const b = tileSurface(draft.bonusMove.q, draft.bonusMove.r)
-        return (
-          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke={bonusColor} strokeWidth={2} strokeOpacity={0.75}
-            strokeDasharray="5 3" markerEnd="url(#arrow-bonus)" />
-        )
-      })()}
-
-      {committedMyPath   && pathSegments(committedMyPath,   myColor,       0.85, 'arrow-commit-my',  'cm')}
-      {committedOpponentPath && pathSegments(committedOpponentPath, opponentColor, 0.85, 'arrow-commit-opp', 'co')}
-      {prevMyPath        && pathSegments(prevMyPath,        myColor,       0.30, 'arrow-last-my',    'pm')}
-      {prevOpponentPath  && pathSegments(prevOpponentPath,  opponentColor, 0.30, 'arrow-last-opp',   'po')}
 
       {/* ── Player cylinders ── */}
       {[
