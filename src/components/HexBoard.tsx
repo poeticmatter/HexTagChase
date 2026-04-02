@@ -2,7 +2,7 @@ import { type JSX } from 'react'
 import { motion } from 'motion/react'
 import type { HexCoord, WallCoord } from '../types'
 import { hexToPixel, getAllHexes, HEX_RADIUS } from '../lib/hexGrid'
-import { obstacleSet, buildWallSet, validNeighbors, reachableDestinations } from '../lib/hexGameLogic'
+import { obstacleSet } from '../lib/hexGameLogic'
 import type { DraftPlan } from './PlanningPanel'
 import type { UIStep } from '../types'
 
@@ -186,12 +186,9 @@ function sideFacePts(cx: number, cy: number, elev: number, vIdx: number): string
 const HEX_H = (Math.sqrt(3) / 2) * HEX_SIZE
 
 const WALL_EDGE_OFFSETS: Record<string, [[number, number], [number, number]]> = {
-  '0,-1':  [[-HEX_SIZE / 2, -HEX_H], [HEX_SIZE / 2, -HEX_H]],
   '1,-1':  [[HEX_SIZE / 2,  -HEX_H], [HEX_SIZE, 0]],
   '1,0':   [[HEX_SIZE,      0      ], [HEX_SIZE / 2, HEX_H]],
   '0,1':   [[HEX_SIZE / 2,  HEX_H ], [-HEX_SIZE / 2, HEX_H]],
-  '-1,1':  [[-HEX_SIZE / 2, HEX_H ], [-HEX_SIZE, 0]],
-  '-1,0':  [[-HEX_SIZE,     0      ], [-HEX_SIZE / 2, -HEX_H]],
 }
 
 interface WallEdgePoints {
@@ -215,29 +212,6 @@ function wallEdgeIso(
   }
 }
 
-// ── Game logic helpers ────────────────────────────────────────────────────────
-
-function getValidTargets(
-  step: UIStep | 'ready',
-  draft: DraftPlan,
-  myPos: HexCoord,
-  opponentPos: HexCoord,
-  obstacles: HexCoord[],
-  walls: Set<string>,
-): Set<string> {
-  const blocked = obstacleSet(obstacles)
-  switch (step) {
-    case 'select_movement':
-      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
-    case 'select_prediction':
-      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
-    case 'select_bonus':
-      return new Set(validNeighbors(draft.moveDest ?? myPos, blocked, walls).map(hexKey))
-    case 'ready':
-      return new Set()
-  }
-}
-
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -256,6 +230,7 @@ interface Props {
   waitingForPartner: boolean
   winner: 'chaser' | 'evader' | null
   showCoords: boolean
+  validTargets: Set<string>
   onHexClick: (hex: HexCoord) => void
 }
 
@@ -267,7 +242,7 @@ export function HexBoard({
   committedMyPath, committedOpponentPath,
   isChaser, obstacles, walls,
   currentStep, draft, waitingForPartner, winner,
-  showCoords, onHexClick,
+  showCoords, validTargets, onHexClick,
 }: Props) {
   const { width, height, offsetX, offsetY } = boardDimensions()
 
@@ -275,10 +250,6 @@ export function HexBoard({
   const sortedCells = getAllHexes().sort((a, b) => (2 * a.r + a.q) - (2 * b.r + b.q))
 
   const obstacleKeys = obstacleSet(obstacles)
-  const wallKeys     = buildWallSet(walls)
-  const validTargets = (!waitingForPartner && !winner)
-    ? getValidTargets(currentStep, draft, myPos, opponentPos, obstacles, wallKeys)
-    : new Set<string>()
 
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
   const opponentColor = isChaser ? '#3b82f6' : '#ef4444'

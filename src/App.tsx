@@ -8,6 +8,8 @@ import { Lobby } from './components/Lobby'
 import type { HexCoord, TurnPlan, MatchSettings } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
 import type { LobbySettings } from './lib/matchConfig'
+import { obstacleSet, buildWallSet, reachableDestinations, validNeighbors } from './lib/hexGameLogic'
+import { useMemo } from 'react'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -58,6 +60,29 @@ const EMPTY_DRAFT: DraftPlan = {
   moveDest: null,
   predictDest: null,
   bonusMove: null,
+}
+
+function hexKey(h: HexCoord): string { return `${h.q},${h.r}` }
+
+function getValidTargets(
+  step: UIStep | 'ready',
+  draft: DraftPlan,
+  myPos: HexCoord,
+  opponentPos: HexCoord,
+  obstacles: HexCoord[],
+  walls: Set<string>,
+): Set<string> {
+  const blocked = obstacleSet(obstacles)
+  switch (step) {
+    case 'select_movement':
+      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
+    case 'select_prediction':
+      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
+    case 'select_bonus':
+      return new Set(validNeighbors(draft.moveDest ?? myPos, blocked, walls).map(hexKey))
+    case 'ready':
+      return new Set()
+  }
 }
 
 function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' {
@@ -148,6 +173,12 @@ function GameView({
   const committedMyPath       = isChaser ? committedChaserPath : committedEvaderPath
   const committedOpponentPath = isChaser ? committedEvaderPath : committedChaserPath
 
+  const validTargets = useMemo(() => {
+    if (effectiveWaiting || gameState.winner) return new Set<string>()
+    const wallKeys = buildWallSet(gameState.walls)
+    return getValidTargets(currentStep, draft, myPos, opponentPos, gameState.obstacles, wallKeys)
+  }, [effectiveWaiting, gameState.winner, currentStep, draft, myPos, opponentPos, gameState.obstacles, gameState.walls])
+
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
       {/* Header */}
@@ -190,6 +221,7 @@ function GameView({
         draft={draft}
         waitingForPartner={effectiveWaiting}
         winner={gameState.winner}
+        validTargets={validTargets}
         onHexClick={handleHexClick}
       />
 

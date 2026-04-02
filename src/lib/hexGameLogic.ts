@@ -125,15 +125,12 @@ function isConnectedThrough(
 // ── Wall section helpers ──────────────────────────────────────────────────
 
 function canonicalEdgeKey(q1: number, r1: number, q2: number, r2: number): string {
-  const k1 = `${q1},${r1}`
-  const k2 = `${q2},${r2}`
-  return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`
+  const norm = normalizeWall(q1, r1, q2, r2)
+  return `${norm.q1},${norm.r1}|${norm.q2},${norm.r2}`
 }
 
 function normalizeWall(q1: number, r1: number, q2: number, r2: number): WallCoord {
-  const k1 = `${q1},${r1}`
-  const k2 = `${q2},${r2}`
-  return k1 < k2 ? { q1, r1, q2, r2 } : { q1: q2, r1: r2, q2: q1, r2: r1 }
+  return q1 < q2 || (q1 === q2 && r1 < r2) ? { q1, r1, q2, r2 } : { q1: q2, r1: r2, q2: q1, r2: r1 }
 }
 
 /**
