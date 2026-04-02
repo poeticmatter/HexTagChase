@@ -15,6 +15,10 @@ const OBS_ELEV   = 26     // Obstacle tile elevation in screen pixels
 const ELEV_VAR   = 3      // ±variation in normal tile elevation
 const WALL_H     = 11     // Height of 3D wall barriers
 
+// Screen-space shadow vector (lower-right, matching the face-light gradient direction).
+// Applied per elevation unit: [dx, dy] in SVG pixels.
+const SHADOW_VEC: [number, number] = [0.8, 0.5]
+
 // ── Color palette ─────────────────────────────────────────────────────────────
 const ROCK_TOPS  = ['#8c8275', '#877c6e', '#918070', '#7e7568', '#8a7f72', '#938679']
 const OBS_TOPS   = ['#6b5848', '#5e4f3d', '#735f4d', '#644f3e']
@@ -289,7 +293,71 @@ export function HexBoard({
 
   // ── Build unified render queue ───────────────────────────────────────────────
 
+  // Precompute elevations for O(1) shadow lookups — built once, shared by all renderHex calls
   const allHexes = getAllHexes().sort((a, b) => tileDepth(a.q, a.r) - tileDepth(b.q, b.r))
+  const elevMap = new Map<string, number>()
+  for (const { q, r } of allHexes) {
+    elevMap.set(`${q},${r}`, tileElevation(q, r, obstacleKeys.has(`${q},${r}`)))
+  }
+
+  /**
+   * Receiver-owned shadow decals for a tile's top face.
+   * Each shadow is a parallelogram: the shared edge translated uniformly by
+   * SHADOW_VEC * elevDiff. A per-hex <clipPath> (defined in <defs>) clips the
+   * parallelogram to the tile boundary — no manual bounds calculation needed.
+   *
+   * ID scheme: clip-${q+10}-${r+10} keeps all IDs alphanumeric-safe (HEX_RADIUS=4
+   * → q/r ∈ [-4,4] → offset values ∈ [6,14], always positive, never colliding).
+   */
+  function shadowDecals(q: number, r: number, cx: number, cy: number, elev: number): JSX.Element | null {
+    const currentElev = elevMap.get(`${q},${r}`) ?? BASE_ELEV
+    const v = topFaceCoords(cx, cy, elev, HEX_SIZE)
+    const polys: JSX.Element[] = []
+
+    function pt([x, y]: [number, number]): string {
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }
+    function translate(vert: [number, number], scale: number): [number, number] {
+      return [vert[0] + SHADOW_VEC[0] * scale, vert[1] + SHADOW_VEC[1] * scale]
+    }
+    function paraPoints(va: [number, number], vb: [number, number], scale: number): string {
+      // Parallelogram: original edge + uniformly translated edge (reversed for winding)
+      return [va, vb, translate(vb, scale), translate(va, scale)].map(pt).join(' ')
+    }
+
+    // Dir 6 (dq=-1, dr=0): upper-left neighbor shares edge v3→v4
+    const dir6Elev = elevMap.get(`${q - 1},${r}`)
+    if (dir6Elev !== undefined) {
+      const diff = Math.max(0, dir6Elev - currentElev)
+      if (diff > 0) {
+        polys.push(
+          <polygon key="sd-6" points={paraPoints(v[3], v[4], diff)}
+            fill="rgba(0,0,0,0.30)" filter="url(#shadow-blur)" style={{ pointerEvents: 'none' }} />,
+        )
+      }
+    }
+
+    // Dir 1 (dq=0, dr=-1): straight-up neighbor shares edge v4→v5
+    const dir1Elev = elevMap.get(`${q},${r - 1}`)
+    if (dir1Elev !== undefined) {
+      const diff = Math.max(0, dir1Elev - currentElev)
+      if (diff > 0) {
+        polys.push(
+          <polygon key="sd-1" points={paraPoints(v[4], v[5], diff)}
+            fill="rgba(0,0,0,0.30)" filter="url(#shadow-blur)" style={{ pointerEvents: 'none' }} />,
+        )
+      }
+    }
+
+    if (polys.length === 0) return null
+
+    return (
+      <g clipPath={`url(#clip-${q + 10}-${r + 10})`} style={{ pointerEvents: 'none' }}>
+        {polys}
+      </g>
+    )
+  }
+
   const renderQueue: Renderable[] = []
 
   for (const { q, r } of allHexes) {
@@ -398,6 +466,9 @@ export function HexBoard({
           strokeWidth={topStrokeW}
         />
 
+        {/* Shadow decals — receiver-owned, above top face, below light overlay */}
+        {shadowDecals(q, r, cx, cy, elev)}
+
         {/* Directional light overlay — same shape, gradient fill */}
         <polygon
           points={topFacePts(cx, cy, elev, HEX_SIZE)}
@@ -505,6 +576,26 @@ export function HexBoard({
           <path d="M0 16 Q16 8 32 16 Q48 24 64 16"  fill="none" stroke="#1c6ab4" strokeWidth="1.2" opacity="0.3"/>
           <path d="M0 24 Q16 16 32 24 Q48 32 64 24" fill="none" stroke="#1c6ab4" strokeWidth="0.7" opacity="0.18"/>
         </pattern>
+
+        {/*
+          Soft shadow blur — single global filter, reused by every shadow polygon.
+          Expanded bounds (200%×200%) prevent the Gaussian from hard-clipping at
+          the default SVG filter region before the blur fully decays to zero.
+        */}
+        <filter id="shadow-blur" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" />
+        </filter>
+
+        {/* Per-hex clip paths for shadow decals — one per tile, keyed by offset coords */}
+        {allHexes.map(({ q, r }) => {
+          const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
+          const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`))
+          return (
+            <clipPath key={`cp-${q},${r}`} id={`clip-${q + 10}-${r + 10}`}>
+              <polygon points={topFacePts(cx, cy, elev, HEX_SIZE)} />
+            </clipPath>
+          )
+        })}
 
         {/* Arrow markers */}
         {([
