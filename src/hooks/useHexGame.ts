@@ -9,8 +9,8 @@ type PeerMessage =
 
 function buildInitialState(settings: MatchSettings): GameState {
   const { chaserPos, evaderPos } = getInitialPositions()
-  const obstacles = generateObstacles(chaserPos, evaderPos)
-  const walls = generateWalls(chaserPos, evaderPos, obstacles)
+  const obstacles = generateObstacles(chaserPos, evaderPos, settings.obstacleCount)
+  const walls = generateWalls(chaserPos, evaderPos, obstacles, settings.wallCount)
 
   return {
     settings,

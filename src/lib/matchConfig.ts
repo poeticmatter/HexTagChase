@@ -11,6 +11,8 @@ export interface LobbySettings {
   maxTurns: number
   hostRole: 'Chaser' | 'Evader'
   bonusTiming: BonusTiming
+  obstacleCount: number
+  wallCount: number
 }
 
 /**
@@ -22,5 +24,7 @@ export function resolveMatchSettings(lobby: LobbySettings): MatchSettings {
     maxTurns: lobby.maxTurns,
     chaserPlayer: lobby.hostRole === 'Chaser' ? 1 : 2,
     bonusTiming: lobby.bonusTiming,
+    obstacleCount: lobby.obstacleCount,
+    wallCount: lobby.wallCount,
   }
 }

@@ -6,12 +6,16 @@ interface LobbyFormState {
   maxTurns: number
   hostRole: 'Chaser' | 'Evader'
   bonusTiming: BonusTiming
+  obstacleCount: number
+  wallCount: number
 }
 
 const DEFAULT_FORM: LobbyFormState = {
   maxTurns: 15,
   hostRole: 'Chaser',
   bonusTiming: 'pre-commit',
+  obstacleCount: 12,
+  wallCount: 0,
 }
 
 const BONUS_TIMING_DESCRIPTIONS: Record<BonusTiming, string> = {
@@ -103,6 +107,49 @@ export function Lobby({ onCreateGame }: Props) {
           </div>
           <p className="text-xs text-neutral-500 leading-relaxed">
             {BONUS_TIMING_DESCRIPTIONS[form.bonusTiming]}
+          </p>
+        </div>
+
+        {/* Obstacle density */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+            Obstacles
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={20}
+              value={form.obstacleCount}
+              onChange={e => setForm(f => ({ ...f, obstacleCount: Number(e.target.value) }))}
+              className="flex-1 accent-blue-500"
+            />
+            <span className="text-sm font-mono text-neutral-200 w-6 text-right">
+              {form.obstacleCount}
+            </span>
+          </div>
+        </div>
+
+        {/* Wall density */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+            Wall Sections
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={4}
+              value={form.wallCount}
+              onChange={e => setForm(f => ({ ...f, wallCount: Number(e.target.value) }))}
+              className="flex-1 accent-blue-500"
+            />
+            <span className="text-sm font-mono text-neutral-200 w-6 text-right">
+              {form.wallCount}
+            </span>
+          </div>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            Each section is a connected group of 4–6 soft-wall edges. Players can cross a wall by spending their full movement budget on that single step.
           </p>
         </div>
       </div>

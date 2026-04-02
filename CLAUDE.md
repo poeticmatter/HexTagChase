@@ -20,7 +20,7 @@ Optional: set `DISABLE_HMR=true` in `.env.local` to disable hot module replaceme
 
 Two-player peer-to-peer hex grid game ("Hex Tag"). No backend — PeerJS handles networking directly between browsers.
 
-**Game concept**: A chaser and evader take turns on a hex grid. The chaser wins by reaching an adjacent hex; the evader wins by surviving 15 turns. Both players choose their movement, a predicted destination for their opponent, and an optional bonus move each round.
+**Game concept**: A chaser and evader take turns on a hex grid. The chaser wins by reaching an adjacent hex; the evader wins by surviving a configurable number of turns. Both players secretly pre-commit their move and, optionally, a bonus move each round. The chaser also submits a prediction of the evader's destination — a correct prediction earns the chaser a bonus step.
 
 ### File Structure
 
@@ -30,24 +30,15 @@ src/
 ├── types.ts                   # All core types and discriminated unions
 ├── main.tsx
 ├── components/
-│   ├── HexBoard.tsx           # SVG hex renderer with drag/click interaction
-│   ├── Lobby.tsx              # Room creation/join UI
-│   └── PlanningPanel.tsx      # Multi-phase input UI with step tracking
+│   ├── HexBoard.tsx           # SVG hex renderer with click interaction and path arrows
+│   ├── Lobby.tsx              # Room creation/join UI with match settings sliders
+│   └── PlanningPanel.tsx      # Multi-step input UI with phase and step tracking
 ├── hooks/
 │   └── useHexGame.ts          # PeerJS orchestrator + game state manager
 └── lib/
     ├── hexGrid.ts             # Hex coordinate utilities and rendering math
     ├── hexGameLogic.ts        # Core game resolution engine and map generation
-    └── powers/
-        ├── IAthletePower.ts   # Interface + BasePower abstract class
-        ├── PowerFactory.ts    # Factory — maps PowerName → strategy instance
-        ├── Standard.ts        # Baseline: 2-step move, prediction, bonus
-        ├── Vault.ts           # Cancels movement if opponent predicts landing
-        ├── Juke.ts            # Reacting phase: decides execution after seeing opponent
-        ├── Line.ts            # Chooses between two targets; opponent can't predict both
-        ├── Idle.ts            # Can skip move; grants range_3 buff next turn
-        ├── Climber.ts         # Can traverse obstacles in a 2-step move
-        └── Declarer.ts        # Declares intended target; bonus if fulfilled
+    └── matchConfig.ts         # LobbySettings → MatchSettings conversion
 ```
 
 ### Core Data Model
@@ -55,45 +46,66 @@ src/
 Key types live in `src/types.ts`:
 
 - `HexCoord { q, r }` — axial hex coordinates
-- `GameState` — positions, obstacles, walls, phase, turn counter, modifiers, transient context
-- `GamePhase = 'declaring' | 'planning' | 'reacting'` (resolution is implicit after reacting)
-- `PowerName` — union of all 7 power names
-- `TurnPlan` — discriminated union: `StandardPlan | LinePlan | IdlePlan | DeclarationPlan | ReactionPlan`
-- `Modifier { role, effect, expiresAtTurn }` — persistent turn buffs (e.g., `range_3` from Idle)
+- `WallCoord { q1, r1, q2, r2 }` — an edge between two adjacent hexes; traversable at cost 2
+- `MatchSettings` — immutable match config: `maxTurns`, `chaserPlayer`, `bonusTiming`, `obstacleCount`, `wallCount`
+- `GameState` — positions, obstacles, walls, phase, turn counter, transient context, per-player turn data
+- `GamePhase = 'planning' | 'bonus_phase'`
+- `TurnPlan` — discriminated union: `ChaserPlan | EvaderPlan | BonusPlan`
+- `TransientContext` — ephemeral within-turn data: committed paths (post-reveal mode), bonus entitlement, prediction result
+
+### Match Configuration
+
+`src/lib/matchConfig.ts` is the single conversion point from `LobbySettings` (raw UI state) to `MatchSettings` (resolved, immutable game config).
+
+`LobbySettings` fields:
+- `maxTurns` — turn limit (10–20, default 15)
+- `hostRole` — which role the host plays
+- `bonusTiming` — `'pre-commit'` or `'post-reveal'`
+- `obstacleCount` — number of obstacle hexes to generate (0–20, default 12)
+- `wallCount` — number of wall sections to generate (0–4, default 0)
+
+All five fields are forwarded verbatim into `MatchSettings`.
 
 ### Game Phase Pipeline
 
-Each turn flows through active phases in order, then resolves:
+Each turn flows through at most two phases:
 
 ```
-declaring  →  planning  →  reacting  →  _resolveRound()  →  next turn
+planning  →  [bonus_phase]  →  next turn
 ```
 
-Only phases declared by one of the active powers via `requiresPhase()` run. Planning always runs. After resolution, `transientContext` (declarations, unmasked moves, reaction plans) is reset.
+`planning` always runs. `bonus_phase` only runs in `post-reveal` bonus timing mode — movement resolves first, then the entitled player selects their bonus step interactively. In `pre-commit` mode both phases collapse: movement and bonus resolve together in `_resolveRound()`.
 
-### Athlete Powers System
+Resolution entry point is `processPhase()` in `hexGameLogic.ts`. It dispatches to `_resolveRound()` (pre-commit) or `_resolveMovementAndTransition()` → `_applyBonusAndFinish()` (post-reveal).
 
-Powers follow the **Strategy Pattern**: each extends `BasePower` and overrides only the hooks it needs.
+### Map Generation
 
-| Hook | Purpose |
-|------|---------|
-| `onReachableDestinationsRequest()` | Modify available movement targets |
-| `onBeforeMoveExecution()` | Abort movement (return `false` to cancel) |
-| `onPathExecution()` | Alter the path taken |
-| `onBonusCalculation()` | Control self-bonus and nullify opponent bonus |
-| `onRoundEnd()` | Add modifiers or persist state |
-| `requiresPhase()` / `getRequiredSteps()` | Declare which phases and UI steps are needed |
+`generateObstacles(chaserPos, evaderPos, count)` — places up to `count` obstacle hexes. Obstacles are excluded from the board perimeter and must not form clusters of three. No obstacle is placed within 2 hexes of either player's starting position.
 
-`_resolveRound()` in `hexGameLogic.ts` calls these hooks in strict order for both players. Powers are fully encapsulated — core logic does not reference specific power names.
+`generateWalls(chaserPos, evaderPos, obstacles, wallCount)` — places `wallCount` wall sections (groups of 4–6 connected edge segments). Returns `[]` immediately when `wallCount === 0`. Walls are soft barriers: players can cross them at movement cost 2. Generation enforces: no three consecutive walled edges on any hex, both players remain connected through the wall layout.
 
-### Adding a New Power
+### Weighted Movement (reachableDestinations)
 
-Adding a power requires exactly these four steps (never partially implement):
+Movement uses a **cost-aware BFS** with a budget of 2:
 
-1. Create `src/lib/powers/MyPower.ts` extending `BasePower`, override relevant hooks
-2. Add the name to the `PowerName` union in `src/types.ts`
-3. If the power needs a new plan shape, add it to the `TurnPlan` discriminated union in `src/types.ts` and handle it in all exhaustive switches
-4. Register it in `PowerFactory.getPowerStrategy()` in `src/lib/powers/PowerFactory.ts`
+- Standard edge (no wall): cost 1
+- Walled edge: cost 2
+
+A player can cross a wall only by spending their full budget on that single step (starting adjacent to the wall). Moving one standard step then attempting to cross a wall totals cost 3 and is rejected.
+
+`reachableDestinations(pos, blocked, walls, budget?)` implements this BFS. Do not replace it with the old two-pass `validNeighbors` loop.
+
+`validNeighbors` remains unchanged — it is used for bonus targeting (budget-1 hard barrier semantics, walls block).
+
+### Path Execution Contract
+
+`executePath(start, dest, blocked, walls)` returns the array of hexes visited (not including start). The UI layer (`HexBoard.tsx`) renders path arrows by iterating this array pairwise — do not change its return type or semantics.
+
+- 1-step standard move: `[dest]`
+- 2-step standard move: `[mid, dest]`
+- 1-step wall crossing (cost 2, full budget): `[dest]` — no phantom intermediate
+
+`findIntermediateCell` handles the distance-1 case without an `isPassable` check (cost enforcement already happened in `reachableDestinations`). The distance-2 second-leg check (`isPassable(mid, dest, walls)`) is intentionally preserved — it rejects cost-overrun paths (1 standard + 1 walled = 3).
 
 ### Networking (Orchestrator)
 
@@ -108,13 +120,12 @@ Message types are discriminated: `GAME_STATE` (broadcast) and `SUBMIT_PLAN` (pla
 ### Architecture Rules
 
 - **Decoupling**: UI components react to state values only. All mutations go through `processPhase()` / `useHexGame`'s dispatch logic — never mutate state directly in components.
-- **Single Responsibility**: Each power class does one thing. Do not add unrelated logic to existing power hooks or `hexGameLogic.ts`.
 - **Predictability**: All game logic flows through the `processPhase()` → `_resolveRound()` pipeline. Do not introduce state mutations outside it.
-- **OCP compliance**: Adding powers must not require changes to `hexGameLogic.ts` — only hook overrides and factory registration.
+- **Movement system**: `reachableDestinations` is the authoritative source for valid targets. `validNeighbors` is for 1-step/bonus targeting only. Do not conflate them.
 
 ### Change Discipline
 
 - Maintain existing patterns unless explicitly instructed to refactor.
 - If a requested change requires touching more than 3 files, state which files will be affected before proceeding.
-- Do not modify `src/types.ts` without explicit instruction — `TurnPlan` and `PowerName` changes cascade to all exhaustive switches across the codebase.
-- When adding a new power, always complete all four steps above. Never partially implement.
+- Do not modify `src/types.ts` without explicit instruction — `TurnPlan` changes cascade to all exhaustive switches across the codebase.
+- Do not alter the PeerJS orchestration, the game phase pipeline, or the path execution contract without explicit instruction.

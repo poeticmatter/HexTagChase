@@ -46,6 +46,7 @@ function wouldMakeClusterOfThree(
 export function generateObstacles(
   chaserPos: HexCoord,
   evaderPos: HexCoord,
+  count: number,
 ): HexCoord[] {
   const allCells = getAllHexes()
 
@@ -62,7 +63,7 @@ export function generateObstacles(
     ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
   }
 
-  const target = Math.round(allCells.length / 6)
+  const target = count
   const placed = new Set<string>()
   const result: HexCoord[] = []
 
@@ -251,13 +252,16 @@ function growWallSection(
 
 /**
  * Generates wall sections — connected groups of 4–6 edge segments.
- * sectionCount is hardcoded to 2 for 'both' mode.
+ * wallCount controls how many sections to attempt to place (0 = no walls).
  */
 export function generateWalls(
   chaserPos: HexCoord,
   evaderPos: HexCoord,
   existingObstacles: HexCoord[],
+  wallCount: number,
 ): WallCoord[] {
+  if (wallCount === 0) return []
+
   const allCells = getAllHexes()
   const obstacleKeys = new Set(existingObstacles.map(({ q, r }) => `${q},${r}`))
 
@@ -298,7 +302,7 @@ export function generateWalls(
   const result: WallCoord[] = []
   const placedWallSet = new Set<string>()
   let sectionsPlaced = 0
-  const sectionCount = 2
+  const sectionCount = wallCount
 
   for (const startEdge of candidatePool) {
     if (sectionsPlaced >= sectionCount) break
@@ -349,26 +353,53 @@ export function validNeighbors(
     )
 }
 
-/** All cells reachable from pos in 2 steps. Excludes pos itself. */
+/**
+ * All cells reachable from pos within a movement budget of 2.
+ * Standard edges cost 1. Edges crossing a wall cost 2.
+ * A wall can only be crossed in a single step starting from an adjacent hex
+ * (budget ≥ 2 required). Moving 1 standard step then crossing a wall
+ * would total 3 — over budget — and is therefore excluded.
+ * Excludes pos itself.
+ */
 export function reachableDestinations(
   pos: HexCoord,
   blocked: Set<string>,
   walls: Set<string> = new Set(),
+  budget = 2,
 ): HexCoord[] {
-  const step1Cells = validNeighbors(pos, blocked, walls)
   const startKey = `${pos.q},${pos.r}`
-  const reached = new Set<string>(step1Cells.map(h => `${h.q},${h.r}`))
-  const result = [...step1Cells]
-  for (const mid of step1Cells) {
-    for (const h of validNeighbors(mid, blocked, walls)) {
-      const key = `${h.q},${h.r}`
-      if (key !== startKey && !reached.has(key)) {
-        reached.add(key)
-        result.push(h)
-      }
+  // Track the minimum cost paid to reach each hex.
+  const bestCost = new Map<string, number>([[startKey, 0]])
+  const queue: Array<{ hex: HexCoord; spent: number }> = [{ hex: pos, spent: 0 }]
+  const reachable: HexCoord[] = []
+
+  while (queue.length > 0) {
+    const { hex, spent } = queue.shift()!
+
+    // Skip stale queue entries (a cheaper path was already found).
+    if ((bestCost.get(`${hex.q},${hex.r}`) ?? Infinity) < spent) continue
+
+    for (const { dq, dr } of Object.values(HEX_DIRECTIONS)) {
+      const nq = hex.q + dq
+      const nr = hex.r + dr
+      const nk = `${nq},${nr}`
+      if (!isOnBoard(nq, nr)) continue
+      if (blocked.has(nk)) continue
+
+      const edgeCost = walls.has(`${hex.q},${hex.r}>${nq},${nr}`) ? 2 : 1
+      const newCost = spent + edgeCost
+      if (newCost > budget) continue
+
+      const prev = bestCost.get(nk)
+      if (prev !== undefined && prev <= newCost) continue
+
+      if (prev === undefined) reachable.push({ q: nq, r: nr })
+      bestCost.set(nk, newCost)
+      queue.push({ hex: { q: nq, r: nr }, spent: newCost })
     }
   }
-  return result
+
+  return reachable
 }
 
 // ── Movement ──────────────────────────────────────────────────────────────
@@ -385,7 +416,9 @@ function findIntermediateCell(
   walls: Set<string> = new Set(),
 ): HexCoord | null {
   if (hexDistance(start.q, start.r, destination.q, destination.r) === 1) {
-    if (isOnBoard(destination.q, destination.r) && !blocked.has(`${destination.q},${destination.r}`) && isPassable(start, destination, walls)) {
+    // Wall-crossing direct steps are valid here — cost enforcement already happened
+    // in reachableDestinations. We only reject obstacles and out-of-board destinations.
+    if (isOnBoard(destination.q, destination.r) && !blocked.has(`${destination.q},${destination.r}`)) {
       return destination
     }
     return null

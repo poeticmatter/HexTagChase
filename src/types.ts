@@ -16,6 +16,8 @@ export interface MatchSettings {
   maxTurns: number
   chaserPlayer: 1 | 2
   bonusTiming: BonusTiming
+  obstacleCount: number
+  wallCount: number
 }
 
 export type GamePhase = 'planning' | 'bonus_phase'
