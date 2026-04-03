@@ -9,6 +9,26 @@ import { mapRegistry } from '../lib/mapRegistry'
 /** Maximum number of client-side reconnect attempts before giving up. */
 const MAX_RECONNECT_ATTEMPTS = 5
 
+// ── ICE server config ─────────────────────────────────────────────────────────
+
+/**
+ * RTCConfiguration passed to every Peer instance.
+ *
+ * Google's public STUN servers handle most cases. If players are behind
+ * symmetric NAT a TURN relay is required — add credentials here:
+ *
+ *   { urls: 'turn:your-turn-server.com', username: '…', credential: '…' }
+ *
+ * Free TURN options: Metered.ca (free tier), Cloudflare (paid), self-hosted coturn.
+ */
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+  ],
+}
+
 /**
  * Base delay multiplier in ms. Actual delay = attempt * BASE.
  * Attempt 1 → 1.5 s, 2 → 3 s, …, 5 → 7.5 s.
@@ -125,7 +145,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
       if (!settings) return
 
-      const peer = new Peer(`hex-tag-${roomCode}`)
+      const peer = new Peer(`hex-tag-${roomCode}`, { config: ICE_CONFIG })
       activePeer.current = peer
       syncState(buildInitialState(settings))
 
@@ -236,7 +256,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
       function attemptConnection() {
         const isReconnecting = reconnectAttempts.current > 0
-        const clientPeer = new Peer()
+        const clientPeer = new Peer(undefined, { config: ICE_CONFIG })
         activePeer.current = clientPeer
 
         clientPeer.on('open', () => {
