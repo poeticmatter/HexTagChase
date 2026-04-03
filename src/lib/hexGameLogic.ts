@@ -91,8 +91,8 @@ function getEdgeAdjacentEdges(wall: WallCoord): WallCoord[] {
   // Two "third hexes" — one per vertex of this edge
   const C1 = { q: q1 + prev.dq, r: r1 + prev.dr }
   const C2 = { q: q1 + next.dq, r: r1 + next.dr }
-  const A  = { q: q1, r: r1 }
-  const B  = { q: q2, r: r2 }
+  const A = { q: q1, r: r1 }
+  const B = { q: q2, r: r2 }
 
   const result: WallCoord[] = []
   for (const [from, to] of [[A, C1], [B, C1], [A, C2], [B, C2]] as [HexCoord, HexCoord][]) {
@@ -164,7 +164,7 @@ function growWallSection(
       for (const adj of getEdgeAdjacentEdges(edge)) {
         const k = canonicalEdgeKey(adj.q1, adj.r1, adj.q2, adj.r2)
         if (!sectionKeys.has(k) && availableKeys.has(k) && !seen.has(k)
-            && !wouldCreateThreeConsecutiveWalls(adj, sectionWallSet)) {
+          && !wouldCreateThreeConsecutiveWalls(adj, sectionWallSet)) {
           candidates.push(adj)
           seen.add(k)
         }
@@ -199,7 +199,7 @@ export function calculateEdgeCost(
 
   if (fromIsObstacle && !toIsObstacle) {
     // Jump DOWN
-    return isWall ? 2 : 0
+    return isWall ? 2 : 1
   } else if (!fromIsObstacle && toIsObstacle) {
     // Climb UP
     return isWall ? 3 : 2
@@ -361,7 +361,7 @@ function _resolveRound(state: GameState): GameState {
     const from = chaserPath.at(-1) ?? state.chaserPos
     const bm = p1Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
-        && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
+      && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
       chaserPath.push(bm)
       bonusUsedBy = 'chaser'
     }
@@ -369,7 +369,7 @@ function _resolveRound(state: GameState): GameState {
     const from = evaderPath.at(-1) ?? state.evaderPos
     const bm = p2Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
-        && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
+      && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
       evaderPath.push(bm)
       bonusUsedBy = 'evader'
     }
@@ -484,13 +484,13 @@ function _applyBonusAndFinish(state: GameState): GameState {
     const bm = bonusPlan.bonusMove
     if (entitledRole === 'chaser') {
       if (hexDistance(state.chaserPos.q, state.chaserPos.r, bm.q, bm.r) === 1
-          && calculateEdgeCost(state.chaserPos, bm, blocked, wallKeys) <= 1) {
+        && calculateEdgeCost(state.chaserPos, bm, blocked, wallKeys) <= 1) {
         chaserPath.push(bm)
         bonusUsedBy = 'chaser'
       }
     } else {
       if (hexDistance(state.evaderPos.q, state.evaderPos.r, bm.q, bm.r) === 1
-          && calculateEdgeCost(state.evaderPos, bm, blocked, wallKeys) <= 1) {
+        && calculateEdgeCost(state.evaderPos, bm, blocked, wallKeys) <= 1) {
         evaderPath.push(bm)
         bonusUsedBy = 'evader'
       }
