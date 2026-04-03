@@ -99,7 +99,7 @@ function GameView({
   playerRole: 1 | 2
   settings: MatchSettings | null
 }) {
-  const { gameState, status, errorMsg, waitingForPartner, submitPlan } =
+  const { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound } =
     useHexGame(roomCode, playerRole, settings)
 
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
@@ -250,10 +250,10 @@ function GameView({
         onHexClick={handleHexClick}
       />
 
-      {gameState.winner ? (
+      {gameState.matchState.matchWinner ? (
         <div className="flex flex-col items-center gap-4">
-          <p className="text-lg font-semibold">
-            {(gameState.winner === 'chaser') === isChaser ? '🎉 You win!' : 'Opponent wins.'}
+          <p className="text-lg font-semibold text-yellow-400">
+            {gameState.matchState.matchWinner === playerRole ? '🏆 You won the match!' : '💀 Opponent won the match.'}
           </p>
           <button
             onClick={() => window.location.reload()}
@@ -261,6 +261,22 @@ function GameView({
           >
             Play Again
           </button>
+        </div>
+      ) : gameState.winner ? (
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-lg font-semibold">
+            {(gameState.winner === 'chaser') === isChaser ? '🎉 You win the round!' : 'Opponent wins the round.'}
+          </p>
+          {playerRole === 1 ? (
+            <button
+              onClick={startNextRound}
+              className="px-6 py-2 bg-green-800 hover:bg-green-700 rounded-lg text-sm text-neutral-300 transition-colors"
+            >
+              Start Next Round
+            </button>
+          ) : (
+            <p className="text-sm text-neutral-400 animate-pulse">Waiting for Host to start next round...</p>
+          )}
         </div>
       ) : (
         <div className="w-full max-w-sm" key={`${gameState.turn}-${gameState.phase}`}>

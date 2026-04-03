@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
-import { processPhase, buildPlanningSchema } from '../lib/hexGameLogic'
+import { processPhase, buildPlanningSchema, buildNextRoundState } from '../lib/hexGameLogic'
 import { mapRegistry } from '../lib/mapRegistry'
 
 type PeerMessage =
@@ -16,6 +16,11 @@ function buildInitialState(settings: MatchSettings): GameState {
 
   return {
     settings,
+    matchState: {
+      roundNumber: 1,
+      history: [],
+      matchWinner: null
+    },
     chaserPos: mapDef.chaserStart,
     evaderPos: mapDef.evaderStart,
     prevChaserPath: null,
@@ -176,5 +181,15 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     }
   }, [playerRole, checkExecutionTrigger])
 
-  return { gameState, status, errorMsg, waitingForPartner, submitPlan }
+  const startNextRound = useCallback(() => {
+    if (playerRole !== 1) return
+    const current = live.current.state
+    if (!current) return
+
+    const nextState = buildNextRoundState(current)
+    syncState(nextState)
+    live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
+  }, [playerRole, syncState])
+
+  return { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound }
 }
