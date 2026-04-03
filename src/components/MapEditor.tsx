@@ -41,6 +41,7 @@ export function MapEditor() {
   const [mapName, setMapName] = useState(DEFAULT_MAP_NAME)
   const [mode, setMode] = useState<EditorMode>('obstacle')
   const [isOrthographic, setIsOrthographic] = useState(true)
+  const [showCoords, setShowCoords] = useState(true)
 
   const [chaserStart, setChaserStart] = useState<HexCoord>({ q: -3, r: 0 })
   const [evaderStart, setEvaderStart] = useState<HexCoord>({ q: 3, r: 0 })
@@ -199,6 +200,14 @@ export function MapEditor() {
           >
             {isOrthographic ? 'Switch to Isometric' : 'Switch to Orthographic'}
           </button>
+          <button
+            onClick={() => setShowCoords(v => !v)}
+            className={`py-2 px-4 rounded text-sm font-medium transition-colors ${
+              showCoords ? 'bg-blue-700 text-white hover:bg-blue-600' : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+            }`}
+          >
+            {showCoords ? 'Hide Coordinates' : 'Show Coordinates'}
+          </button>
         </div>
 
         <div className="mt-auto">
@@ -227,10 +236,11 @@ export function MapEditor() {
           draft={{ moveDest: null, movePath: null, predictDest: null, bonusMove: null }}
           waitingForPartner={false}
           winner={null}
-          showCoords={true}
+          showCoords={showCoords}
           validTargets={validTargets}
           onHexClick={(hex) => handleHexClickWithEvent(hex)}
           isOrthographic={isOrthographic}
+          suppressValidHighlight={true}
           editorMode={mode === 'wall'}
           onWallToggle={(w) => {
             setWalls(prev => {

@@ -264,6 +264,7 @@ interface Props {
   onHexClick: (hex: HexCoord) => void
   isOrthographic?: boolean
   editorMode?: boolean
+  suppressValidHighlight?: boolean
   onWallToggle?: (w: WallCoord) => void
 }
 
@@ -276,7 +277,7 @@ export function HexBoard({
   isChaser, obstacles, walls,
   currentStep, draft, waitingForPartner, winner,
   showCoords, validTargets, onHexClick,
-  isOrthographic = false, editorMode = false, onWallToggle
+  isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle
 }: Props) {
   const isoY = isOrthographic ? 1.0 : 0.55
   const { width, height, offsetX, offsetY } = boardDimensions(isoY)
@@ -438,9 +439,11 @@ export function HexBoard({
     const elev = tileElevation(q, r, isObstacle, isOrthographic)
 
     let topColor = tileTopColor(q, r, isObstacle)
-    if (isValid)                   topColor = '#5d9ab5'
-    if (isMovePick || isBonusPick) topColor = '#3d9e6a'
-    if (isPredPick)                topColor = '#8b5cc4'
+    if (!suppressValidHighlight) {
+      if (isValid)                   topColor = '#5d9ab5'
+      if (isMovePick || isBonusPick) topColor = '#3d9e6a'
+      if (isPredPick)                topColor = '#8b5cc4'
+    }
 
     const sideR = darken(topColor, 0.68)
     const sideB = darken(topColor, 0.55)
@@ -448,9 +451,12 @@ export function HexBoard({
 
     let topStroke = 'none'
     let topStrokeW = 0
-    if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
-    if (isMovePick || isBonusPick) { topStroke = '#6edba0'; topStrokeW = 1.5 }
-    if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
+    if (!suppressValidHighlight) {
+      if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
+      if (isMovePick || isBonusPick) { topStroke = '#6edba0'; topStrokeW = 1.5 }
+      if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
+    }
+    if (suppressValidHighlight && isObstacle) { topStroke = '#f97316'; topStrokeW = 2.5 }
 
     return (
       <g
