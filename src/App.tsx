@@ -64,27 +64,6 @@ const EMPTY_DRAFT: DraftPlan = {
 
 function hexKey(h: HexCoord): string { return `${h.q},${h.r}` }
 
-function getValidTargets(
-  step: UIStep | 'ready',
-  draft: DraftPlan,
-  myPos: HexCoord,
-  opponentPos: HexCoord,
-  obstacles: HexCoord[],
-  walls: Set<string>,
-): Set<string> {
-  const blocked = obstacleSet(obstacles)
-  switch (step) {
-    case 'select_movement':
-      return new Set(reachableDestinations(myPos, blocked, walls).map(hexKey))
-    case 'select_prediction':
-      return new Set(reachableDestinations(opponentPos, blocked, walls).map(hexKey))
-    case 'select_bonus':
-      return new Set(validNeighbors(draft.moveDest ?? myPos, blocked, walls).map(hexKey))
-    case 'ready':
-      return new Set()
-  }
-}
-
 function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' {
   for (const step of schema.requiredSteps) {
     if (step === 'select_movement' && !draft.moveDest) return step
@@ -152,13 +131,43 @@ function GameView({
   // Players with no steps this phase are handled natively by the engine.
   const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
 
-  const validTargets = useMemo(() => {
-    if (!gameState || effectiveWaiting || gameState.winner) return new Set<string>()
-    const myPos       = isChaser ? gameState.chaserPos : gameState.evaderPos
+  // Topology — recomputed only when map structure changes, never on draft updates.
+  const topology = useMemo(() => {
+    if (!gameState) return null
+    return {
+      blocked: obstacleSet(gameState.obstacles),
+      wallKeys: buildWallSet(gameState.walls),
+    }
+  }, [gameState])
+
+  // Heavy BFS — isolated from draft; runs exactly once per turn phase.
+  const cachedMoveTargets = useMemo<Set<string>>(() => {
+    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Set()
+    const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
+    return new Set(reachableDestinations(myPos, topology.blocked, topology.wallKeys).map(hexKey))
+  }, [gameState, topology, effectiveWaiting, isChaser])
+
+  const cachedPredictTargets = useMemo<Set<string>>(() => {
+    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Set()
     const opponentPos = isChaser ? gameState.evaderPos : gameState.chaserPos
-    const wallKeys    = buildWallSet(gameState.walls)
-    return getValidTargets(currentStep, draft, myPos, opponentPos, gameState.obstacles, wallKeys)
-  }, [gameState, effectiveWaiting, isChaser, currentStep, draft])
+    return new Set(reachableDestinations(opponentPos, topology.blocked, topology.wallKeys).map(hexKey))
+  }, [gameState, topology, effectiveWaiting, isChaser])
+
+  // O(1) router — returns pre-computed sets for move/predict; bonus stays draft-reactive
+  // because its origin is the uncommitted moveDest, not the authoritative game position.
+  const validTargets = useMemo<Set<string>>(() => {
+    if (!gameState || effectiveWaiting || gameState.winner) return new Set()
+    switch (currentStep) {
+      case 'select_movement':   return cachedMoveTargets
+      case 'select_prediction': return cachedPredictTargets
+      case 'select_bonus': {
+        if (!topology) return new Set()
+        const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
+        return new Set(validNeighbors(draft.moveDest ?? myPos, topology.blocked, topology.wallKeys).map(hexKey))
+      }
+      case 'ready': return new Set()
+    }
+  }, [gameState, effectiveWaiting, currentStep, cachedMoveTargets, cachedPredictTargets, topology, isChaser, draft.moveDest])
 
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
