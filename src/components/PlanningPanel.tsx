@@ -2,6 +2,7 @@ import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, GamePha
 
 export interface DraftPlan {
   moveDest: HexCoord | null
+  movePath: HexCoord[] | null
   predictDest: HexCoord | null
   bonusMove: HexCoord | null
 }
@@ -30,23 +31,25 @@ function draftToTurnPlan(
   }
 
   if (isChaser) {
-    if (!draft.moveDest || !draft.predictDest) return null
+    if (!draft.moveDest || !draft.movePath || !draft.predictDest) return null
     return {
       type: 'chaser',
       turn,
       phase,
       moveDest: draft.moveDest,
+      movePath: draft.movePath,
       predictDest: draft.predictDest,
       ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
     }
   }
 
-  if (!draft.moveDest) return null
+  if (!draft.moveDest || !draft.movePath) return null
   return {
     type: 'evader',
     turn,
     phase,
     moveDest: draft.moveDest,
+    movePath: draft.movePath,
     ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
   }
 }

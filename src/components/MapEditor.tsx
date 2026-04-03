@@ -224,7 +224,7 @@ export function MapEditor() {
           obstacles={obstacleArray}
           walls={wallArray}
           currentStep="ready"
-          draft={{ moveDest: null, predictDest: null, bonusMove: null }}
+          draft={{ moveDest: null, movePath: null, predictDest: null, bonusMove: null }}
           waitingForPartner={false}
           winner={null}
           showCoords={true}
