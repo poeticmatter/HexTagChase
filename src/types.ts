@@ -12,12 +12,20 @@ export type Role = 'chaser' | 'evader'
 
 export type BonusTiming = 'pre-commit' | 'post-reveal'
 
+export interface MapDefinition {
+  id: string
+  name: string
+  chaserStart: HexCoord
+  evaderStart: HexCoord
+  obstacles: HexCoord[]
+  walls: WallCoord[]
+}
+
 export interface MatchSettings {
   maxTurns: number
   chaserPlayer: 1 | 2
   bonusTiming: BonusTiming
-  obstacleCount: number
-  wallCount: number
+  mapId: string
 }
 
 export type GamePhase = 'planning' | 'bonus_phase'

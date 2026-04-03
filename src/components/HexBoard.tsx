@@ -9,10 +9,6 @@ import type { UIStep } from '../types'
 // ── Layout ────────────────────────────────────────────────────────────────────
 const HEX_SIZE   = 38
 const PADDING    = 52
-const ISO_Y      = 0.55   // Vertical compression for isometric view
-const BASE_ELEV  = 11     // Base tile elevation in screen pixels
-const OBS_ELEV   = 26     // Obstacle tile elevation in screen pixels
-const ELEV_VAR   = 3      // ±variation in normal tile elevation
 const WALL_H     = 11     // Height of 3D wall barriers
 
 // Screen-space shadow vector (lower-right, matching the face-light gradient direction).
@@ -36,10 +32,11 @@ function tileRand(q: number, r: number): number {
   return ((h >>> 16) & 0xffff) / 0x10000
 }
 
-function tileElevation(q: number, r: number, isObstacle: boolean): number {
+function tileElevation(q: number, r: number, isObstacle: boolean, isOrtho: boolean = false): number {
+  if (isOrtho) return 0
   const rand = tileRand(q, r)
-  if (isObstacle) return OBS_ELEV + (rand - 0.5) * 4
-  return BASE_ELEV + (rand - 0.5) * 2 * ELEV_VAR
+  if (isObstacle) return 26 + (rand - 0.5) * 4 // OBS_ELEV = 26
+  return 11 + (rand - 0.5) * 2 * 3 // BASE_ELEV = 11, ELEV_VAR = 3
 }
 
 function tileTopColor(q: number, r: number, isObstacle: boolean): string {
@@ -62,8 +59,8 @@ function darken(color: string, factor: number): string {
 }
 
 /** Screen coordinates for all 6 vertices of a tile's top face. */
-function topFaceCoords(cx: number, cy: number, elev: number, size: number): [number, number][] {
-  return hexVertOffsets(size).map(([dx, dy]) => [cx + dx, cy - elev + dy])
+function topFaceCoords(cx: number, cy: number, elev: number, size: number, isoY: number): [number, number][] {
+  return hexVertOffsets(size, isoY).map(([dx, dy]) => [cx + dx, cy - elev + dy])
 }
 
 /**
@@ -71,8 +68,8 @@ function topFaceCoords(cx: number, cy: number, elev: number, size: number): [num
  * Places tiny flat ellipses just inside each selected edge, oriented along it,
  * so they look like growth emerging from the crack between adjacent tiles.
  */
-function mossEdgeAccents(cx: number, cy: number, elev: number, q: number, r: number): JSX.Element[] {
-  const verts = topFaceCoords(cx, cy, elev, HEX_SIZE)
+function mossEdgeAccents(cx: number, cy: number, elev: number, q: number, r: number, isoY: number): JSX.Element[] {
+  const verts = topFaceCoords(cx, cy, elev, HEX_SIZE, isoY)
   const accents: JSX.Element[] = []
   let key = 0
 
@@ -126,11 +123,11 @@ function mossEdgeAccents(cx: number, cy: number, elev: number, q: number, r: num
 
 // ── Isometric geometry ────────────────────────────────────────────────────────
 
-function boardDimensions() {
+function boardDimensions(isoY: number) {
   const worldExtentY = Math.sqrt(3) * HEX_SIZE * (2 * HEX_RADIUS + 1)
-  const isoExtentY   = worldExtentY * ISO_Y
+  const isoExtentY   = worldExtentY * isoY
   const worldExtentX = (3 * HEX_RADIUS + 2) * HEX_SIZE
-  const maxElev      = OBS_ELEV + 4 + WALL_H
+  const maxElev      = isoY === 1.0 ? 0 : 26 + 4 + WALL_H
 
   const width   = worldExtentX + PADDING * 2
   const height  = isoExtentY + maxElev + PADDING * 2
@@ -142,30 +139,30 @@ function boardDimensions() {
 }
 
 /** Screen coordinates of a hex's ground-level center. */
-function isoCenter(q: number, r: number, offsetX: number, offsetY: number) {
+function isoCenter(q: number, r: number, offsetX: number, offsetY: number, isoY: number) {
   const { x, y } = hexToPixel(q, r, HEX_SIZE)
-  return { cx: x + offsetX, cy: y * ISO_Y + offsetY }
+  return { cx: x + offsetX, cy: y * isoY + offsetY }
 }
 
 /**
  * The 6 vertex offsets for a flat-top hex in isometric screen space.
- * The y offset has ISO_Y already applied.
+ * The y offset has isoY already applied.
  */
-function hexVertOffsets(size: number): [number, number][] {
+function hexVertOffsets(size: number, isoY: number): [number, number][] {
   const h = (Math.sqrt(3) / 2) * size
   return [
     [+size,     0        ],  // 0 right
-    [+size / 2, +h * ISO_Y],  // 1 lower-right
-    [-size / 2, +h * ISO_Y],  // 2 lower-left
+    [+size / 2, +h * isoY],  // 1 lower-right
+    [-size / 2, +h * isoY],  // 2 lower-left
     [-size,     0        ],  // 3 left
-    [-size / 2, -h * ISO_Y],  // 4 upper-left
-    [+size / 2, -h * ISO_Y],  // 5 upper-right
+    [-size / 2, -h * isoY],  // 4 upper-left
+    [+size / 2, -h * isoY],  // 5 upper-right
   ]
 }
 
 /** SVG points string for a tile's top face (inset size, elevated). */
-function topFacePts(cx: number, cy: number, elev: number, size: number): string {
-  return hexVertOffsets(size)
+function topFacePts(cx: number, cy: number, elev: number, size: number, isoY: number): string {
+  return hexVertOffsets(size, isoY)
     .map(([dx, dy]) => `${(cx + dx).toFixed(1)},${(cy - elev + dy).toFixed(1)}`)
     .join(' ')
 }
@@ -175,8 +172,8 @@ function topFacePts(cx: number, cy: number, elev: number, size: number): string 
  * Uses full HEX_SIZE so sides extend to tile boundary regardless of top inset.
  * vIdx: 0=right face, 1=bottom face, 2=left face (the three viewer-facing sides).
  */
-function sideFacePts(cx: number, cy: number, elev: number, vIdx: number): string {
-  const offs = hexVertOffsets(HEX_SIZE)
+function sideFacePts(cx: number, cy: number, elev: number, vIdx: number, isoY: number): string {
+  const offs = hexVertOffsets(HEX_SIZE, isoY)
   const va = offs[vIdx]
   const vb = offs[(vIdx + 1) % 6]
   const ax = (cx + va[0]).toFixed(1), ay_top = (cy - elev + va[1]).toFixed(1)
@@ -232,15 +229,16 @@ function wallEdgeIso(
   q1: number, r1: number, q2: number, r2: number,
   elev: number,
   offsetX: number, offsetY: number,
+  isoY: number,
 ): WallEdgePoints | null {
   const offs = WALL_EDGE_OFFSETS[`${q2 - q1},${r2 - r1}`]
   if (!offs) return null
   const { x: ax, y: ay } = hexToPixel(q1, r1, HEX_SIZE)
   return {
     x1: ax + offs[0][0] + offsetX,
-    y1: (ay + offs[0][1]) * ISO_Y + offsetY - elev,
+    y1: (ay + offs[0][1]) * isoY + offsetY - elev,
     x2: ax + offs[1][0] + offsetX,
-    y2: (ay + offs[1][1]) * ISO_Y + offsetY - elev,
+    y2: (ay + offs[1][1]) * isoY + offsetY - elev,
   }
 }
 
@@ -264,6 +262,9 @@ interface Props {
   showCoords: boolean
   validTargets: Set<string>
   onHexClick: (hex: HexCoord) => void
+  isOrthographic?: boolean
+  editorMode?: boolean
+  onWallToggle?: (w: WallCoord) => void
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -275,8 +276,10 @@ export function HexBoard({
   isChaser, obstacles, walls,
   currentStep, draft, waitingForPartner, winner,
   showCoords, validTargets, onHexClick,
+  isOrthographic = false, editorMode = false, onWallToggle
 }: Props) {
-  const { width, height, offsetX, offsetY } = boardDimensions()
+  const isoY = isOrthographic ? 1.0 : 0.55
+  const { width, height, offsetX, offsetY } = boardDimensions(isoY)
 
   const obstacleKeys = obstacleSet(obstacles)
 
@@ -286,8 +289,8 @@ export function HexBoard({
 
   /** Screen coordinates of the top surface center of a tile. */
   function tileSurface(q: number, r: number) {
-    const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
-    const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`))
+    const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
+    const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
     return { x: cx, y: cy - elev }
   }
 
@@ -297,7 +300,7 @@ export function HexBoard({
   const allHexes = getAllHexes().sort((a, b) => tileDepth(a.q, a.r) - tileDepth(b.q, b.r))
   const elevMap = new Map<string, number>()
   for (const { q, r } of allHexes) {
-    elevMap.set(`${q},${r}`, tileElevation(q, r, obstacleKeys.has(`${q},${r}`)))
+    elevMap.set(`${q},${r}`, tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic))
   }
 
   /**
@@ -310,8 +313,9 @@ export function HexBoard({
    * → q/r ∈ [-4,4] → offset values ∈ [6,14], always positive, never colliding).
    */
   function shadowDecals(q: number, r: number, cx: number, cy: number, elev: number): JSX.Element | null {
-    const currentElev = elevMap.get(`${q},${r}`) ?? BASE_ELEV
-    const v = topFaceCoords(cx, cy, elev, HEX_SIZE)
+    if (isOrthographic) return null
+    const currentElev = elevMap.get(`${q},${r}`) ?? 11 // BASE_ELEV
+    const v = topFaceCoords(cx, cy, elev, HEX_SIZE, isoY)
     const polys: JSX.Element[] = []
 
     function pt([x, y]: [number, number]): string {
@@ -423,14 +427,14 @@ export function HexBoard({
   function renderHex({ q, r }: RenderableHex) {
     const key = `hex-${q},${r}`
     const coordKey = `${q},${r}`
-    const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
+    const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
     const isObstacle  = obstacleKeys.has(coordKey)
     const isValid     = validTargets.has(coordKey)
     const isMovePick  = !!(draft.moveDest    && hexKey(draft.moveDest)    === coordKey)
     const isBonusPick = !!(draft.bonusMove   && hexKey(draft.bonusMove)   === coordKey)
     const isPredPick  = !!(draft.predictDest && hexKey(draft.predictDest) === coordKey)
 
-    const elev = tileElevation(q, r, isObstacle)
+    const elev = tileElevation(q, r, isObstacle, isOrthographic)
 
     let topColor = tileTopColor(q, r, isObstacle)
     if (isValid)                   topColor = '#5d9ab5'
@@ -451,34 +455,66 @@ export function HexBoard({
       <g
         key={key}
         style={{ cursor: isValid ? 'pointer' : 'default' }}
-        onClick={() => isValid && onHexClick({ q, r })}
+        onClick={(e) => {
+          if (editorMode && onWallToggle) {
+            // Find the closest edge in orthographic mode
+            const rect = (e.target as Element).getBoundingClientRect();
+            // Approximating center of hexagon click bounding box
+            const hx = e.clientX - (rect.left + rect.width / 2);
+            const hy = e.clientY - (rect.top + rect.height / 2);
+
+            // This is a rough estimation of the edge
+            const angle = Math.atan2(hy, hx)
+            const deg = angle * (180 / Math.PI)
+
+            let dq = 0, dr = 0
+            if (deg >= -60 && deg < 0) { dq = 1; dr = -1 } // top right
+            else if (deg >= 0 && deg < 60) { dq = 1; dr = 0 } // bottom right
+            else if (deg >= 60 && deg < 120) { dq = 0; dr = 1 } // bottom
+            else if (deg >= 120 && deg < 180) { dq = -1; dr = 1 } // bottom left
+            else if (deg >= -180 && deg < -120) { dq = -1; dr = 0 } // top left
+            else if (deg >= -120 && deg < -60) { dq = 0; dr = -1 } // top
+
+            if (dq !== 0 || dr !== 0) {
+              onWallToggle({ q1: q, r1: r, q2: q + dq, r2: r + dr })
+              return
+            }
+          }
+          if (isValid) onHexClick({ q, r })
+        }}
       >
         {/* Three viewer-facing side faces (right → bottom → left) */}
-        <polygon points={sideFacePts(cx, cy, elev, 0)} fill={sideR} />
-        <polygon points={sideFacePts(cx, cy, elev, 1)} fill={sideB} />
-        <polygon points={sideFacePts(cx, cy, elev, 2)} fill={sideL} />
+        {!isOrthographic && (
+          <>
+            <polygon points={sideFacePts(cx, cy, elev, 0, isoY)} fill={sideR} />
+            <polygon points={sideFacePts(cx, cy, elev, 1, isoY)} fill={sideB} />
+            <polygon points={sideFacePts(cx, cy, elev, 2, isoY)} fill={sideL} />
+          </>
+        )}
 
         {/* Top face */}
         <polygon
-          points={topFacePts(cx, cy, elev, HEX_SIZE)}
+          points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)}
           fill={topColor}
-          stroke={topStroke}
-          strokeWidth={topStrokeW}
+          stroke={isOrthographic ? (topStroke === 'none' ? '#555' : topStroke) : topStroke}
+          strokeWidth={isOrthographic && topStroke === 'none' ? 1 : topStrokeW}
         />
 
         {/* Shadow decals — receiver-owned, above top face, below light overlay */}
-        {shadowDecals(q, r, cx, cy, elev)}
+        {!isOrthographic && shadowDecals(q, r, cx, cy, elev)}
 
         {/* Directional light overlay — same shape, gradient fill */}
-        <polygon
-          points={topFacePts(cx, cy, elev, HEX_SIZE)}
-          fill="url(#face-light)"
-          style={{ pointerEvents: 'none' }}
-        />
+        {!isOrthographic && (
+          <polygon
+            points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)}
+            fill="url(#face-light)"
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
 
         {/* Edge highlights: upper edges catch light (vertices 3→4→5→0) */}
-        {(() => {
-          const v = topFaceCoords(cx, cy, elev, HEX_SIZE)
+        {!isOrthographic && (() => {
+          const v = topFaceCoords(cx, cy, elev, HEX_SIZE, isoY)
           const hi = [3, 4, 5, 0].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
           const sh = [0, 1, 2, 3].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
           return (
@@ -490,8 +526,8 @@ export function HexBoard({
         })()}
 
         {/* Moss / seaweed in edge cracks — only on plain, non-interactive tiles */}
-        {!isObstacle && !isValid && !isMovePick && !isBonusPick && !isPredPick
-          && mossEdgeAccents(cx, cy, elev, q, r)}
+        {!isOrthographic && !isObstacle && !isValid && !isMovePick && !isBonusPick && !isPredPick
+          && mossEdgeAccents(cx, cy, elev, q, r, isoY)}
 
         {showCoords && (
           <text
@@ -509,12 +545,22 @@ export function HexBoard({
   }
 
   function renderWall({ wall: { q1, r1, q2, r2 } }: RenderableWall) {
-    const elev1 = tileElevation(q1, r1, obstacleKeys.has(`${q1},${r1}`))
-    const elev2 = tileElevation(q2, r2, obstacleKeys.has(`${q2},${r2}`))
+    const elev1 = tileElevation(q1, r1, obstacleKeys.has(`${q1},${r1}`), isOrthographic)
+    const elev2 = tileElevation(q2, r2, obstacleKeys.has(`${q2},${r2}`), isOrthographic)
     // Sit the wall on the higher of the two adjacent tile surfaces
     const elev = Math.max(elev1, elev2)
-    const e = wallEdgeIso(q1, r1, q2, r2, elev, offsetX, offsetY)
+    const e = wallEdgeIso(q1, r1, q2, r2, elev, offsetX, offsetY, isoY)
     if (!e) return null
+
+    if (isOrthographic) {
+      return (
+        <g key={`wall-${q1},${r1}|${q2},${r2}`} style={{ pointerEvents: 'none' }}>
+          <line x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
+            stroke="#ef4444" strokeWidth={6} strokeLinecap="round" />
+        </g>
+      )
+    }
+
     return (
       <g key={`wall-${q1},${r1}|${q2},${r2}`} style={{ pointerEvents: 'none' }}>
         {/* Shadow line below */}
@@ -588,11 +634,11 @@ export function HexBoard({
 
         {/* Per-hex clip paths for shadow decals — one per tile, keyed by offset coords */}
         {allHexes.map(({ q, r }) => {
-          const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
-          const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`))
+          const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
+          const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
           return (
             <clipPath key={`cp-${q},${r}`} id={`clip-${q + 10}-${r + 10}`}>
-              <polygon points={topFacePts(cx, cy, elev, HEX_SIZE)} />
+              <polygon points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)} />
             </clipPath>
           )
         })}
@@ -623,12 +669,12 @@ export function HexBoard({
         Shadow offset grows with elevation so taller rocks cast longer shadows.
         Uses allHexes (already depth-sorted) so shadow order matches tile order.
       */}
-      {allHexes.map(({ q, r }) => {
-        const { cx, cy } = isoCenter(q, r, offsetX, offsetY)
-        const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`))
+      {!isOrthographic && allHexes.map(({ q, r }) => {
+        const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
+        const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
         const sdx = 2 + elev * 0.20
         const sdy = 4 + elev * 0.34
-        const pts = hexVertOffsets(HEX_SIZE)
+        const pts = hexVertOffsets(HEX_SIZE, isoY)
           .map(([dx, dy]) => `${(cx + dx + sdx).toFixed(1)},${(cy + dy + sdy).toFixed(1)}`)
           .join(' ')
         return <polygon key={`sh-${q},${r}`} points={pts} fill="#000d1a" opacity={0.30} />
@@ -654,7 +700,7 @@ export function HexBoard({
             animate={{ x, y }}
             transition={{ type: 'spring', stiffness: 280, damping: 26 }}
           >
-            <PlayerCylinder color={color} label={label} />
+            <PlayerCylinder color={color} label={label} isoY={isoY} />
           </motion.g>
         )
       })}
@@ -686,10 +732,10 @@ export function HexBoard({
 // ── PlayerCylinder ────────────────────────────────────────────────────────────
 // Drawn with its base at (0, 0) — the parent motion.g positions it on the tile surface.
 
-function PlayerCylinder({ color, label }: { color: string; label: string }) {
+function PlayerCylinder({ color, label, isoY }: { color: string; label: string; isoY: number }) {
   const r  = 9
   const h  = 17
-  const ry = r * ISO_Y
+  const ry = r * isoY
 
   return (
     <g style={{ pointerEvents: 'none' }}>

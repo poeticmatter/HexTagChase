@@ -6,75 +6,10 @@ import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
 
-// ── Starting positions ─────────────────────────────────────────────────────
-
-export function getInitialPositions(): { chaserPos: HexCoord; evaderPos: HexCoord } {
-  return {
-    chaserPos: { q: -3, r: 0 },
-    evaderPos: { q: 3, r: 0 },
-  }
-}
-
 // ── Obstacles ──────────────────────────────────────────────────────────────
 
 export function obstacleSet(obstacles: HexCoord[]): Set<string> {
   return new Set(obstacles.map(h => `${h.q},${h.r}`))
-}
-
-function wouldMakeClusterOfThree(
-  hex: HexCoord,
-  placed: Set<string>,
-): boolean {
-  const obstacleNeighbors = Object.values(HEX_DIRECTIONS)
-    .map(({ dq, dr }) => ({ q: hex.q + dq, r: hex.r + dr }))
-    .filter(n => placed.has(`${n.q},${n.r}`))
-
-  if (obstacleNeighbors.length >= 2) return true
-
-  if (obstacleNeighbors.length === 1) {
-    const neighbor = obstacleNeighbors[0]
-    const neighborObstacleNeighborCount = Object.values(HEX_DIRECTIONS)
-      .map(({ dq, dr }) => ({ q: neighbor.q + dq, r: neighbor.r + dr }))
-      .filter(n => placed.has(`${n.q},${n.r}`) && !(n.q === hex.q && n.r === hex.r))
-      .length
-    if (neighborObstacleNeighborCount >= 1) return true
-  }
-
-  return false
-}
-
-export function generateObstacles(
-  chaserPos: HexCoord,
-  evaderPos: HexCoord,
-  count: number,
-): HexCoord[] {
-  const allCells = getAllHexes()
-
-  const candidates = allCells.filter(({ q, r }) => {
-    const notOnPerimeter = hexDistance(0, 0, q, r) < HEX_RADIUS
-    const clearOfChaser = hexDistance(q, r, chaserPos.q, chaserPos.r) > 2
-    const clearOfEvader = hexDistance(q, r, evaderPos.q, evaderPos.r) > 2
-    return notOnPerimeter && clearOfChaser && clearOfEvader
-  })
-
-  // Fisher-Yates shuffle
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
-  }
-
-  const target = count
-  const placed = new Set<string>()
-  const result: HexCoord[] = []
-
-  for (const hex of candidates) {
-    if (result.length >= target) break
-    if (wouldMakeClusterOfThree(hex, placed)) continue
-    placed.add(`${hex.q},${hex.r}`)
-    result.push(hex)
-  }
-
-  return result
 }
 
 // ── Wall helpers ──────────────────────────────────────────────────────────
@@ -245,92 +180,6 @@ function growWallSection(
   }
 
   return section
-}
-
-/**
- * Generates wall sections — connected groups of 4–6 edge segments.
- * wallCount controls how many sections to attempt to place (0 = no walls).
- */
-export function generateWalls(
-  chaserPos: HexCoord,
-  evaderPos: HexCoord,
-  existingObstacles: HexCoord[],
-  wallCount: number,
-): WallCoord[] {
-  if (wallCount === 0) return []
-
-  const allCells = getAllHexes()
-  const obstacleKeys = new Set(existingObstacles.map(({ q, r }) => `${q},${r}`))
-
-  // Build pool of all valid candidate edges.
-  // Both cells must be on-board. Skip if both cells are obstacles (wall between two blocked cells
-  // has no gameplay effect). Spawn clearance applied to both endpoints.
-  const candidatePool: WallCoord[] = []
-  const seen = new Set<string>()
-
-  for (const { q, r } of allCells) {
-    for (const { dq, dr } of Object.values(HEX_DIRECTIONS)) {
-      const q2 = q + dq
-      const r2 = r + dr
-      if (!isOnBoard(q2, r2)) continue
-      if (obstacleKeys.has(`${q},${r}`) && obstacleKeys.has(`${q2},${r2}`)) continue
-
-      const k = canonicalEdgeKey(q, r, q2, r2)
-      if (seen.has(k)) continue
-      seen.add(k)
-
-      const clearOfChaser = hexDistance(q, r, chaserPos.q, chaserPos.r) > 2
-        && hexDistance(q2, r2, chaserPos.q, chaserPos.r) > 2
-      const clearOfEvader = hexDistance(q, r, evaderPos.q, evaderPos.r) > 2
-        && hexDistance(q2, r2, evaderPos.q, evaderPos.r) > 2
-      if (!clearOfChaser || !clearOfEvader) continue
-
-      candidatePool.push(normalizeWall(q, r, q2, r2))
-    }
-  }
-
-  // Shuffle for random section placement
-  for (let i = candidatePool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[candidatePool[i], candidatePool[j]] = [candidatePool[j], candidatePool[i]]
-  }
-
-  const availableKeys = new Set(candidatePool.map(w => canonicalEdgeKey(w.q1, w.r1, w.q2, w.r2)))
-  const result: WallCoord[] = []
-  const placedWallSet = new Set<string>()
-  let sectionsPlaced = 0
-  const sectionCount = wallCount
-
-  for (const startEdge of candidatePool) {
-    if (sectionsPlaced >= sectionCount) break
-    if (!availableKeys.has(canonicalEdgeKey(startEdge.q1, startEdge.r1, startEdge.q2, startEdge.r2))) continue
-
-    if (wouldCreateThreeConsecutiveWalls(startEdge, placedWallSet)) continue
-
-    const targetLen = Math.floor(Math.random() * 3) + 4  // 4, 5, or 6 segments
-    const section = growWallSection(startEdge, targetLen, availableKeys, placedWallSet)
-    if (section.length < 4) continue
-
-    // Verify chaser and evader remain connected with all placed walls so far plus this section
-    const testSet = new Set(placedWallSet)
-    for (const { q1, r1, q2, r2 } of section) {
-      testSet.add(`${q1},${r1}>${q2},${r2}`)
-      testSet.add(`${q2},${r2}>${q1},${r1}`)
-    }
-    if (!isConnectedThrough(chaserPos, evaderPos, obstacleKeys, testSet)) continue
-
-    // Accept section: commit walls and remove from available pool
-    for (const w of section) {
-      const k = canonicalEdgeKey(w.q1, w.r1, w.q2, w.r2)
-      availableKeys.delete(k)
-      placedWallSet.add(`${w.q1},${w.r1}>${w.q2},${w.r2}`)
-      placedWallSet.add(`${w.q2},${w.r2}>${w.q1},${w.r1}`)
-      result.push(w)
-    }
-    sectionsPlaced++
-  }
-
-  return result
 }
 
 // ── Neighbors ─────────────────────────────────────────────────────────────
