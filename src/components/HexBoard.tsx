@@ -411,8 +411,9 @@ export function HexBoard({
   if (prevMyPath)            enqueuePathSegments(prevMyPath,            myColor,       0.30, 'arrow-last-my',    'pm')
   if (prevOpponentPath)      enqueuePathSegments(prevOpponentPath,      opponentColor, 0.30, 'arrow-last-opp',   'po')
 
-  if (draft.moveDest)
-    enqueueSingleArrow(myPos, draft.moveDest, myColor, 0.85, 'arrow-move', undefined, 'draft-move')
+  if (draft.movePath && draft.movePath.length > 0) {
+    enqueuePathSegments([myPos, ...draft.movePath], myColor, 0.85, 'arrow-move', 'draft-move')
+  }
 
   if (draft.predictDest)
     enqueueSingleArrow(opponentPos, draft.predictDest, '#a855f7', 0.65, 'arrow-pred', '5 3', 'draft-pred')

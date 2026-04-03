@@ -38,6 +38,7 @@ export interface ChaserPlan {
   turn: number
   phase: GamePhase
   moveDest: HexCoord
+  movePath: HexCoord[]
   predictDest: HexCoord
   bonusMove?: HexCoord
 }
@@ -48,6 +49,7 @@ export interface EvaderPlan {
   turn: number
   phase: GamePhase
   moveDest: HexCoord
+  movePath: HexCoord[]
   bonusMove?: HexCoord
 }
 

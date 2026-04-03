@@ -49,7 +49,7 @@ function isConnectedThrough(
       const nr = r + dr
       const nk = `${nq},${nr}`
       if (!isOnBoard(nq, nr)) continue
-      if (obstacleKeys.has(nk)) continue
+      // Obstacles are fully traversable, only walls block connectivity.
       if (wallSet.has(`${key}>${nk}`)) continue
       if (!visited.has(nk)) queue.push(nk)
     }
@@ -182,9 +182,38 @@ function growWallSection(
   return section
 }
 
+// ── Movement & Pathfinding ──────────────────────────────────────────────────
+
+export function calculateEdgeCost(
+  fromHex: HexCoord,
+  toHex: HexCoord,
+  obstacles: Set<string>,
+  walls: Set<string>,
+): number {
+  const fromKey = `${fromHex.q},${fromHex.r}`
+  const toKey = `${toHex.q},${toHex.r}`
+
+  const fromIsObstacle = obstacles.has(fromKey)
+  const toIsObstacle = obstacles.has(toKey)
+  const isWall = walls.has(`${fromKey}>${toKey}`)
+
+  if (fromIsObstacle && !toIsObstacle) {
+    // Jump DOWN
+    return isWall ? 2 : 0
+  } else if (!fromIsObstacle && toIsObstacle) {
+    // Climb UP
+    return isWall ? 3 : 2
+  } else {
+    // Flat move
+    return isWall ? 2 : 1
+  }
+}
+
 // ── Neighbors ─────────────────────────────────────────────────────────────
 
-/** All valid (on-board, non-obstacle, non-walled) neighbors of a cell. */
+/** All valid neighbors of a cell for standard non-gameplay queries (ignores obstacles, checks walls).
+ *  Note: For gameplay targeting (like bonus moves), use calculateEdgeCost <= 1 instead.
+ */
 export function validNeighbors(
   pos: HexCoord,
   blocked: Set<string>,
@@ -194,123 +223,67 @@ export function validNeighbors(
     .map(({ dq, dr }) => ({ q: pos.q + dq, r: pos.r + dr }))
     .filter(({ q, r }) =>
       isOnBoard(q, r)
-      && !blocked.has(`${q},${r}`)
       && isPassable(pos, { q, r }, walls),
     )
 }
 
 /**
- * All cells reachable from pos within a movement budget of 2.
- * Standard edges cost 1. Edges crossing a wall cost 2.
- * A wall can only be crossed in a single step starting from an adjacent hex
- * (budget ≥ 2 required). Moving 1 standard step then crossing a wall
- * would total 3 — over budget — and is therefore excluded.
- * Excludes pos itself.
+ * All cells reachable from pos within a given movement budget.
+ * Returns a Map where keys are destination hex strings ("q,r") and values
+ * are the shortest paths to reach them (array of HexCoord, not including the start node).
+ * Obstacles are treated as traversable based on calculateEdgeCost.
  */
 export function reachableDestinations(
   pos: HexCoord,
-  blocked: Set<string>,
+  obstacles: Set<string>,
   walls: Set<string> = new Set(),
   budget = 2,
-): HexCoord[] {
+): Map<string, HexCoord[]> {
   const startKey = `${pos.q},${pos.r}`
-  // Track the minimum cost paid to reach each hex.
   const bestCost = new Map<string, number>([[startKey, 0]])
-  const queue: Array<{ hex: HexCoord; spent: number }> = [{ hex: pos, spent: 0 }]
-  const reachable: HexCoord[] = []
+  const paths = new Map<string, HexCoord[]>([[startKey, []]])
+
+  // Dijkstra priority queue (cost, path)
+  const queue: Array<{ hex: HexCoord; spent: number; path: HexCoord[] }> = [
+    { hex: pos, spent: 0, path: [] },
+  ]
+
+  const reachablePaths = new Map<string, HexCoord[]>()
 
   while (queue.length > 0) {
-    const { hex, spent } = queue.shift()!
+    // Sort to act as priority queue (process lowest cost first)
+    queue.sort((a, b) => a.spent - b.spent)
+    const { hex, spent, path } = queue.shift()!
+    const currentKey = `${hex.q},${hex.r}`
 
-    // Skip stale queue entries (a cheaper path was already found).
-    if ((bestCost.get(`${hex.q},${hex.r}`) ?? Infinity) < spent) continue
+    if ((bestCost.get(currentKey) ?? Infinity) < spent) continue
 
     for (const { dq, dr } of Object.values(HEX_DIRECTIONS)) {
       const nq = hex.q + dq
       const nr = hex.r + dr
       const nk = `${nq},${nr}`
-      if (!isOnBoard(nq, nr)) continue
-      if (blocked.has(nk)) continue
 
-      const edgeCost = walls.has(`${hex.q},${hex.r}>${nq},${nr}`) ? 2 : 1
+      if (!isOnBoard(nq, nr)) continue
+
+      const nextHex = { q: nq, r: nr }
+      const edgeCost = calculateEdgeCost(hex, nextHex, obstacles, walls)
       const newCost = spent + edgeCost
+
       if (newCost > budget) continue
 
-      const prev = bestCost.get(nk)
-      if (prev !== undefined && prev <= newCost) continue
+      const prevCost = bestCost.get(nk)
+      if (prevCost !== undefined && prevCost <= newCost) continue
 
-      if (prev === undefined) reachable.push({ q: nq, r: nr })
+      const newPath = [...path, nextHex]
       bestCost.set(nk, newCost)
-      queue.push({ hex: { q: nq, r: nr }, spent: newCost })
+      paths.set(nk, newPath)
+      reachablePaths.set(nk, newPath)
+
+      queue.push({ hex: nextHex, spent: newCost, path: newPath })
     }
   }
 
-  return reachable
-}
-
-// ── Movement ──────────────────────────────────────────────────────────────
-
-/**
- * Finds a valid intermediate cell between start and a destination up to 2 steps away.
- * Returns the first unblocked neighbor of start that is also a neighbor of destination,
- * or the destination itself if it is 1 step away.
- */
-function findIntermediateCell(
-  start: HexCoord,
-  destination: HexCoord,
-  blocked: Set<string>,
-  walls: Set<string> = new Set(),
-): HexCoord | null {
-  if (hexDistance(start.q, start.r, destination.q, destination.r) === 1) {
-    // Wall-crossing direct steps are valid here — cost enforcement already happened
-    // in reachableDestinations. We only reject obstacles and out-of-board destinations.
-    if (isOnBoard(destination.q, destination.r) && !blocked.has(`${destination.q},${destination.r}`)) {
-      return destination
-    }
-    return null
-  }
-
-  for (const { dq, dr } of Object.values(HEX_DIRECTIONS)) {
-    const mid = { q: start.q + dq, r: start.r + dr }
-    if (!isOnBoard(mid.q, mid.r)) continue
-    if (blocked.has(`${mid.q},${mid.r}`)) continue
-    if (!isPassable(start, mid, walls)) continue
-    const destIsAdjacentToMid = Object.values(HEX_DIRECTIONS).some(
-      ({ dq: dq2, dr: dr2 }) => {
-        const dest2 = { q: mid.q + dq2, r: mid.r + dr2 }
-        return dest2.q === destination.q && dest2.r === destination.r
-          && isPassable(mid, destination, walls)
-      },
-    )
-    if (destIsAdjacentToMid) return mid
-  }
-  return null
-}
-
-/**
- * Execute a planned path to a destination.
- * Destination may be 1 or 2 steps away.
- * Returns the sequence of positions actually visited (not including start).
- */
-function executePath(
-  startPos: HexCoord,
-  targetDest: HexCoord,
-  blocked: Set<string>,
-  walls: Set<string> = new Set(),
-): HexCoord[] {
-  const visited: HexCoord[] = []
-  const mid = findIntermediateCell(startPos, targetDest, blocked, walls)
-
-  if (mid) {
-    visited.push(mid)
-    if (mid.q !== targetDest.q || mid.r !== targetDest.r) {
-      if (!blocked.has(`${targetDest.q},${targetDest.r}`) && isPassable(mid, targetDest, walls)) {
-        visited.push(targetDest)
-      }
-    }
-  }
-
-  return visited
+  return reachablePaths
 }
 
 // ── Schema building ────────────────────────────────────────────────────────
@@ -375,8 +348,8 @@ function _resolveRound(state: GameState): GameState {
   const blocked = obstacleSet(state.obstacles)
   const wallKeys = buildWallSet(state.walls)
 
-  const chaserPath = executePath(state.chaserPos, p1Plan.moveDest, blocked, wallKeys)
-  const evaderPath = executePath(state.evaderPos, p2Plan.moveDest, blocked, wallKeys)
+  const chaserPath = [...p1Plan.movePath]
+  const evaderPath = [...p2Plan.movePath]
 
   // Compare against intended destination, not actual landing (consistent with original behavior)
   const chaserPredHit = p1Plan.predictDest.q === p2Plan.moveDest.q
@@ -388,8 +361,7 @@ function _resolveRound(state: GameState): GameState {
     const from = chaserPath.at(-1) ?? state.chaserPos
     const bm = p1Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
-        && !blocked.has(`${bm.q},${bm.r}`)
-        && isPassable(from, bm, wallKeys)) {
+        && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
       chaserPath.push(bm)
       bonusUsedBy = 'chaser'
     }
@@ -397,8 +369,7 @@ function _resolveRound(state: GameState): GameState {
     const from = evaderPath.at(-1) ?? state.evaderPos
     const bm = p2Plan.bonusMove
     if (hexDistance(from.q, from.r, bm.q, bm.r) === 1
-        && !blocked.has(`${bm.q},${bm.r}`)
-        && isPassable(from, bm, wallKeys)) {
+        && calculateEdgeCost(from, bm, blocked, wallKeys) <= 1) {
       evaderPath.push(bm)
       bonusUsedBy = 'evader'
     }
@@ -427,11 +398,8 @@ function _resolveMovementAndTransition(state: GameState): GameState {
     return state
   }
 
-  const blocked = obstacleSet(state.obstacles)
-  const wallKeys = buildWallSet(state.walls)
-
-  const chaserPath = executePath(state.chaserPos, p1Plan.moveDest, blocked, wallKeys)
-  const evaderPath = executePath(state.evaderPos, p2Plan.moveDest, blocked, wallKeys)
+  const chaserPath = [...p1Plan.movePath]
+  const evaderPath = [...p2Plan.movePath]
 
   let finalChaserPath = chaserPath
   let finalEvaderPath = evaderPath
@@ -516,15 +484,13 @@ function _applyBonusAndFinish(state: GameState): GameState {
     const bm = bonusPlan.bonusMove
     if (entitledRole === 'chaser') {
       if (hexDistance(state.chaserPos.q, state.chaserPos.r, bm.q, bm.r) === 1
-          && !blocked.has(`${bm.q},${bm.r}`)
-          && isPassable(state.chaserPos, bm, wallKeys)) {
+          && calculateEdgeCost(state.chaserPos, bm, blocked, wallKeys) <= 1) {
         chaserPath.push(bm)
         bonusUsedBy = 'chaser'
       }
     } else {
       if (hexDistance(state.evaderPos.q, state.evaderPos.r, bm.q, bm.r) === 1
-          && !blocked.has(`${bm.q},${bm.r}`)
-          && isPassable(state.evaderPos, bm, wallKeys)) {
+          && calculateEdgeCost(state.evaderPos, bm, blocked, wallKeys) <= 1) {
         evaderPath.push(bm)
         bonusUsedBy = 'evader'
       }

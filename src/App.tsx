@@ -9,7 +9,7 @@ import { MapEditor } from './components/MapEditor'
 import type { HexCoord, TurnPlan, MatchSettings } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
 import type { LobbySettings } from './lib/matchConfig'
-import { obstacleSet, buildWallSet, reachableDestinations, validNeighbors } from './lib/hexGameLogic'
+import { obstacleSet, buildWallSet, reachableDestinations, validNeighbors, calculateEdgeCost } from './lib/hexGameLogic'
 import { useMemo } from 'react'
 
 function generateRoomCode(): string {
@@ -59,6 +59,7 @@ function WaitingForPartner({ roomCode, opponentRole }: { roomCode: string; oppon
 
 const EMPTY_DRAFT: DraftPlan = {
   moveDest: null,
+  movePath: null,
   predictDest: null,
   bonusMove: null,
 }
@@ -74,10 +75,13 @@ function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' 
   return 'ready'
 }
 
-function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema): DraftPlan {
+function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema, cachedMovePaths: Map<string, HexCoord[]>): DraftPlan {
   const step = getCurrentStep(draft, schema)
   switch (step) {
-    case 'select_movement':   return { ...draft, moveDest: hex }
+    case 'select_movement': {
+      const path = cachedMovePaths.get(`${hex.q},${hex.r}`) ?? []
+      return { ...draft, moveDest: hex, movePath: path }
+    }
     case 'select_prediction': return { ...draft, predictDest: hex }
     case 'select_bonus':      return { ...draft, bonusMove: hex }
     case 'ready':             return draft
@@ -100,16 +104,6 @@ function GameView({
 
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
-
-  const handleHexClick = useCallback((hex: HexCoord) => {
-    setDraft(prev => {
-      if (!gameState) return prev
-      const isChaser = gameState.settings.chaserPlayer === playerRole
-      const roleKey = isChaser ? 'chaser' : 'evader'
-      const schema = gameState.turnSchema[roleKey]
-      return applyClick(prev, hex, schema)
-    })
-  }, [gameState, playerRole])
 
   const handleConfirm = useCallback((plan: TurnPlan) => {
     submitPlan(plan)
@@ -141,30 +135,48 @@ function GameView({
     }
   }, [gameState])
 
-  // Heavy BFS — isolated from draft; runs exactly once per turn phase.
-  const cachedMoveTargets = useMemo<Set<string>>(() => {
-    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Set()
+  // Heavy pathfinding — isolated from draft; runs exactly once per turn phase.
+  // Now returns a Map to give O(1) access to the shortest paths.
+  const cachedMovePaths = useMemo<Map<string, HexCoord[]>>(() => {
+    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
     const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
-    return new Set(reachableDestinations(myPos, topology.blocked, topology.wallKeys).map(hexKey))
+    return reachableDestinations(myPos, topology.blocked, topology.wallKeys)
   }, [gameState, topology, effectiveWaiting, isChaser])
 
-  const cachedPredictTargets = useMemo<Set<string>>(() => {
-    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Set()
+  const cachedPredictPaths = useMemo<Map<string, HexCoord[]>>(() => {
+    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
     const opponentPos = isChaser ? gameState.evaderPos : gameState.chaserPos
-    return new Set(reachableDestinations(opponentPos, topology.blocked, topology.wallKeys).map(hexKey))
+    return reachableDestinations(opponentPos, topology.blocked, topology.wallKeys)
   }, [gameState, topology, effectiveWaiting, isChaser])
+
+  // Target sets for the UI
+  const cachedMoveTargets = useMemo(() => new Set(cachedMovePaths.keys()), [cachedMovePaths])
+  const cachedPredictTargets = useMemo(() => new Set(cachedPredictPaths.keys()), [cachedPredictPaths])
+
+  const handleHexClick = useCallback((hex: HexCoord) => {
+    setDraft(prev => {
+      if (!gameState) return prev
+      const isChaserLocal = gameState.settings.chaserPlayer === playerRole
+      const roleKey = isChaserLocal ? 'chaser' : 'evader'
+      const schema = gameState.turnSchema[roleKey]
+      return applyClick(prev, hex, schema, cachedMovePaths)
+    })
+  }, [gameState, playerRole, cachedMovePaths])
 
   // O(1) router — returns pre-computed sets for move/predict; bonus stays draft-reactive
   // because its origin is the uncommitted moveDest, not the authoritative game position.
   const validTargets = useMemo<Set<string>>(() => {
-    if (!gameState || effectiveWaiting || gameState.winner) return new Set()
+    if (!gameState || effectiveWaiting || gameState.winner || !topology) return new Set()
     switch (currentStep) {
       case 'select_movement':   return cachedMoveTargets
       case 'select_prediction': return cachedPredictTargets
       case 'select_bonus': {
-        if (!topology) return new Set()
-        const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
-        return new Set(validNeighbors(draft.moveDest ?? myPos, topology.blocked, topology.wallKeys).map(hexKey))
+        const fromPos = draft.moveDest ?? (isChaser ? gameState.chaserPos : gameState.evaderPos)
+        return new Set(
+          validNeighbors(fromPos, topology.blocked, topology.wallKeys)
+            .filter(n => calculateEdgeCost(fromPos, n, topology.blocked, topology.wallKeys) <= 1)
+            .map(hexKey)
+        )
       }
       case 'ready': return new Set()
     }
