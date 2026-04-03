@@ -1,28 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
-import { getInitialPositions, generateObstacles, generateWalls, processPhase, buildPlanningSchema } from '../lib/hexGameLogic'
+import { processPhase, buildPlanningSchema } from '../lib/hexGameLogic'
+import { mapRegistry } from '../lib/mapRegistry'
 
 type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState }
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
 
 function buildInitialState(settings: MatchSettings): GameState {
-  const { chaserPos, evaderPos } = getInitialPositions()
-  const obstacles = generateObstacles(chaserPos, evaderPos, settings.obstacleCount)
-  const walls = generateWalls(chaserPos, evaderPos, obstacles, settings.wallCount)
+  const mapDef = mapRegistry.getMapById(settings.mapId)
+  if (!mapDef) {
+    throw new Error(`Map with id ${settings.mapId} not found.`)
+  }
 
   return {
     settings,
-    chaserPos,
-    evaderPos,
+    chaserPos: mapDef.chaserStart,
+    evaderPos: mapDef.evaderStart,
     prevChaserPath: null,
     prevEvaderPath: null,
     phase: 'planning',
     turn: 1,
     winner: null,
-    obstacles,
-    walls,
+    obstacles: mapDef.obstacles,
+    walls: mapDef.walls,
     transientContext: {},
     turnSchema: buildPlanningSchema(settings),
     p1TurnData: {},

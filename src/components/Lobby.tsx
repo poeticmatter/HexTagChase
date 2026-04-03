@@ -1,21 +1,21 @@
 import { useState } from 'react'
 import { BONUS_TIMING_OPTIONS } from '../lib/matchConfig'
 import type { LobbySettings, BonusTiming } from '../lib/matchConfig'
+import { mapRegistry } from '../lib/mapRegistry'
+import { MapThumbnail } from './MapThumbnail'
 
 interface LobbyFormState {
   maxTurns: number
   hostRole: 'Chaser' | 'Evader'
   bonusTiming: BonusTiming
-  obstacleCount: number
-  wallCount: number
+  mapId: string
 }
 
 const DEFAULT_FORM: LobbyFormState = {
   maxTurns: 15,
   hostRole: 'Chaser',
   bonusTiming: 'pre-commit',
-  obstacleCount: 12,
-  wallCount: 0,
+  mapId: mapRegistry.getAllMaps()[0]?.id || 'standard-arena',
 }
 
 const BONUS_TIMING_DESCRIPTIONS: Record<BonusTiming, string> = {
@@ -110,56 +110,40 @@ export function Lobby({ onCreateGame }: Props) {
           </p>
         </div>
 
-        {/* Obstacle density */}
+        {/* Map Selection */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-            Obstacles
+            Select Map
           </label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={0}
-              max={20}
-              value={form.obstacleCount}
-              onChange={e => setForm(f => ({ ...f, obstacleCount: Number(e.target.value) }))}
-              className="flex-1 accent-blue-500"
-            />
-            <span className="text-sm font-mono text-neutral-200 w-6 text-right">
-              {form.obstacleCount}
-            </span>
+          <div className="flex flex-wrap gap-3 justify-center mt-2">
+            {mapRegistry.getAllMaps().map(mapDef => (
+              <div key={mapDef.id}>
+                <MapThumbnail
+                  mapDef={mapDef}
+                  selected={form.mapId === mapDef.id}
+                  onClick={() => setForm(f => ({ ...f, mapId: mapDef.id }))}
+                />
+              </div>
+            ))}
           </div>
-        </div>
-
-        {/* Wall density */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-            Wall Sections
-          </label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={0}
-              max={4}
-              value={form.wallCount}
-              onChange={e => setForm(f => ({ ...f, wallCount: Number(e.target.value) }))}
-              className="flex-1 accent-blue-500"
-            />
-            <span className="text-sm font-mono text-neutral-200 w-6 text-right">
-              {form.wallCount}
-            </span>
-          </div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            Each section is a connected group of 4–6 soft-wall edges. Players can cross a wall by spending their full movement budget on that single step.
-          </p>
         </div>
       </div>
 
-      <button
-        onClick={() => onCreateGame(form)}
-        className="mt-2 px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-semibold text-lg transition-colors"
-      >
-        Create Game
-      </button>
+      <div className="flex gap-4 mt-2">
+        <button
+          onClick={() => { window.location.href = '?editor=true' }}
+          className="px-6 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-neutral-200 font-semibold text-sm transition-colors"
+        >
+          Map Editor
+        </button>
+
+        <button
+          onClick={() => onCreateGame(form)}
+          className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-semibold text-lg transition-colors"
+        >
+          Create Game
+        </button>
+      </div>
     </div>
   )
 }
