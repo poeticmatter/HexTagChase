@@ -15,7 +15,7 @@ const DEFAULT_FORM: LobbyFormState = {
   maxTurns: 15,
   hostRole: 'Chaser',
   bonusTiming: 'pre-commit',
-  mapId: mapRegistry.getAllMaps()[0]?.id || 'standard-arena',
+  mapId: mapRegistry.getAllMaps()[0].id,
 }
 
 const BONUS_TIMING_DESCRIPTIONS: Record<BonusTiming, string> = {

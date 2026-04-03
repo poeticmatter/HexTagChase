@@ -132,7 +132,7 @@ export function MapEditor() {
 
     const json = JSON.stringify(def, null, 2)
     navigator.clipboard.writeText(json)
-    alert('Map JSON copied to clipboard!')
+    alert(`Map JSON copied to clipboard!\n\nSave it to src/maps/${def.id}.json and rebuild to add it to the game.`)
     console.log(json)
   }
 
