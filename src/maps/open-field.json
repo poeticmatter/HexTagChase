@@ -1,8 +1,0 @@
-{
-  "id": "open-field",
-  "name": "Open Field",
-  "chaserStart": { "q": -3, "r": 0 },
-  "evaderStart": { "q": 3, "r": 0 },
-  "obstacles": [],
-  "walls": []
-}
