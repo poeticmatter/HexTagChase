@@ -94,8 +94,15 @@ export interface ResolutionSummary {
   bonusUsedBy: Role | null
 }
 
+export interface MatchState {
+  roundNumber: number
+  history: (1 | 2)[]
+  matchWinner: 1 | 2 | null
+}
+
 export interface GameState {
   settings: MatchSettings
+  matchState: MatchState
   chaserPos: HexCoord
   evaderPos: HexCoord
   prevChaserPath: HexCoord[] | null

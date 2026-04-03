@@ -5,6 +5,7 @@ import type {
 import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
+import { mapRegistry } from './mapRegistry'
 
 // ── Obstacles ──────────────────────────────────────────────────────────────
 
@@ -306,6 +307,37 @@ export function buildPlanningSchema(settings: MatchSettings): Record<Role, TurnS
 
 // ── Round resolution ───────────────────────────────────────────────────────
 
+export function buildNextRoundState(prevState: GameState): GameState {
+  const mapDef = mapRegistry.getMapById(prevState.settings.mapId)
+  if (!mapDef) throw new Error(`Map with id ${prevState.settings.mapId} not found.`)
+
+  const newSettings = {
+    ...prevState.settings,
+    chaserPlayer: prevState.settings.chaserPlayer === 1 ? 2 : 1 as 1 | 2
+  }
+
+  return {
+    ...prevState,
+    settings: newSettings,
+    matchState: {
+      ...prevState.matchState,
+      roundNumber: prevState.matchState.roundNumber + 1
+    },
+    chaserPos: mapDef.chaserStart,
+    evaderPos: mapDef.evaderStart,
+    prevChaserPath: null,
+    prevEvaderPath: null,
+    phase: 'planning',
+    turn: 1,
+    winner: null,
+    p1TurnData: {},
+    p2TurnData: {},
+    transientContext: {},
+    turnSchema: buildPlanningSchema(newSettings),
+    lastResolution: null,
+  }
+}
+
 export function processPhase(
   state: GameState,
   p1Plan: TurnPlan | null,
@@ -504,8 +536,24 @@ function _applyBonusAndFinish(state: GameState): GameState {
   const evaderSurvived = !chaserCatches && state.turn >= state.settings.maxTurns
   const winner: Role | null = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
+  let matchState = state.matchState
+  if (winner) {
+    const winnerPlayer = winner === 'chaser' ? state.settings.chaserPlayer : (state.settings.chaserPlayer === 1 ? 2 : 1)
+    const newHistory = [...matchState.history, winnerPlayer]
+    let matchWinner: 1 | 2 | null = null
+    if (newHistory.length >= 2 && newHistory[newHistory.length - 1] === newHistory[newHistory.length - 2]) {
+      matchWinner = winnerPlayer
+    }
+    matchState = {
+      ...matchState,
+      history: newHistory,
+      matchWinner
+    }
+  }
+
   return {
     ...state,
+    matchState,
     chaserPos: finalChaserPos,
     evaderPos: finalEvaderPos,
     prevChaserPath: chaserPath.length > 0 ? [chaserStart, ...chaserPath] : null,
@@ -547,8 +595,24 @@ function _buildCompletedRoundState(
   const evaderSurvived = !chaserCatches && state.turn >= state.settings.maxTurns
   const winner: Role | null = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
+  let matchState = state.matchState
+  if (winner) {
+    const winnerPlayer = winner === 'chaser' ? state.settings.chaserPlayer : (state.settings.chaserPlayer === 1 ? 2 : 1)
+    const newHistory = [...matchState.history, winnerPlayer]
+    let matchWinner: 1 | 2 | null = null
+    if (newHistory.length >= 2 && newHistory[newHistory.length - 1] === newHistory[newHistory.length - 2]) {
+      matchWinner = winnerPlayer
+    }
+    matchState = {
+      ...matchState,
+      history: newHistory,
+      matchWinner
+    }
+  }
+
   return {
     ...state,
+    matchState,
     chaserPos: finalChaserPos,
     evaderPos: finalEvaderPos,
     prevChaserPath: finalChaserPath.length > 0 ? [chaserStart, ...finalChaserPath] : null,
