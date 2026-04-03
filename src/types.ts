@@ -124,5 +124,6 @@ export type ConnectionStatus =
   | 'waiting_for_partner'
   | 'waiting_for_level'
   | 'playing'
+  | 'reconnecting'
   | 'disconnected'
   | 'error'

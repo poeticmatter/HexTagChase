@@ -33,6 +33,15 @@ function StatusScreen({ message }: { message: string }) {
   )
 }
 
+function ReconnectingScreen() {
+  return (
+    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-3">
+      <p className="text-neutral-200 text-lg font-semibold">Connection lost</p>
+      <p className="text-neutral-500 text-sm animate-pulse">Attempting to restore your session…</p>
+    </div>
+  )
+}
+
 function WaitingForPartner({ roomCode, opponentRole }: { roomCode: string; opponentRole: string }) {
   const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
   return (
@@ -185,6 +194,7 @@ function GameView({
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
   if (status === 'disconnected')        return <StatusScreen message="Your opponent disconnected." />
+  if (status === 'reconnecting')        return <ReconnectingScreen />
   if (status === 'waiting_for_partner') {
     const opponentRole = isChaser ? 'Evader' : 'Chaser'
     return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
