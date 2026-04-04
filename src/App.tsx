@@ -70,7 +70,6 @@ const EMPTY_DRAFT: DraftPlan = {
   moveDest: null,
   movePath: null,
   predictDest: null,
-  bonusMove: null,
 }
 
 function hexKey(h: HexCoord): string { return `${h.q},${h.r}` }
@@ -79,7 +78,6 @@ function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' 
   for (const step of schema.requiredSteps) {
     if (step === 'select_movement' && !draft.moveDest) return step
     if (step === 'select_prediction' && !draft.predictDest) return step
-    if (step === 'select_bonus' && !draft.bonusMove) return step
   }
   return 'ready'
 }
@@ -92,7 +90,6 @@ function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema, cachedM
       return { ...draft, moveDest: hex, movePath: path }
     }
     case 'select_prediction': return { ...draft, predictDest: hex }
-    case 'select_bonus':      return { ...draft, bonusMove: hex }
     case 'ready':             return draft
   }
 }
@@ -122,10 +119,10 @@ function GameView({
     setDraft(EMPTY_DRAFT)
   }, [])
 
-  // Reset draft on turn advance and on phase change (critical for post-reveal bonus_phase)
+  // Reset draft on turn advance
   useEffect(() => {
     setDraft(EMPTY_DRAFT)
-  }, [gameState?.turn, gameState?.phase])
+  }, [gameState?.turn])
 
   // Derived values — computed before early returns so hook order stays stable.
   const isChaser         = gameState?.settings.chaserPlayer === playerRole
@@ -139,7 +136,6 @@ function GameView({
   const topology = useMemo(() => {
     if (!gameState) return null
     return {
-      blocked: obstacleSet(gameState.obstacles),
       wallKeys: buildWallSet(gameState.walls),
     }
   }, [gameState])
@@ -149,13 +145,15 @@ function GameView({
   const cachedMovePaths = useMemo<Map<string, HexCoord[]>>(() => {
     if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
     const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
-    return reachableDestinations(myPos, topology.blocked, topology.wallKeys)
+    const myBudget = isChaser ? gameState.p1Budget : gameState.p2Budget
+    return reachableDestinations(myPos, gameState.elevations, topology.wallKeys, myBudget)
   }, [gameState, topology, effectiveWaiting, isChaser])
 
   const cachedPredictPaths = useMemo<Map<string, HexCoord[]>>(() => {
     if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
     const opponentPos = isChaser ? gameState.evaderPos : gameState.chaserPos
-    return reachableDestinations(opponentPos, topology.blocked, topology.wallKeys)
+    const oppBudget = isChaser ? gameState.p2Budget : gameState.p1Budget
+    return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, oppBudget)
   }, [gameState, topology, effectiveWaiting, isChaser])
 
   // Target sets for the UI
@@ -179,17 +177,9 @@ function GameView({
     switch (currentStep) {
       case 'select_movement':   return cachedMoveTargets
       case 'select_prediction': return cachedPredictTargets
-      case 'select_bonus': {
-        const fromPos = draft.moveDest ?? (isChaser ? gameState.chaserPos : gameState.evaderPos)
-        return new Set(
-          validNeighbors(fromPos, topology.blocked, topology.wallKeys)
-            .filter(n => calculateEdgeCost(fromPos, n, topology.blocked, topology.wallKeys) <= 1)
-            .map(hexKey)
-        )
-      }
       case 'ready': return new Set()
     }
-  }, [gameState, effectiveWaiting, currentStep, cachedMoveTargets, cachedPredictTargets, topology, isChaser, draft.moveDest])
+  }, [gameState, effectiveWaiting, currentStep, cachedMoveTargets, cachedPredictTargets, topology])
 
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
@@ -207,12 +197,6 @@ function GameView({
   const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
-
-  // Post-reveal bonus_phase: show committed movement paths for both players.
-  const committedChaserPath = gameState.transientContext.committedChaserPath ?? null
-  const committedEvaderPath = gameState.transientContext.committedEvaderPath ?? null
-  const committedMyPath       = isChaser ? committedChaserPath : committedEvaderPath
-  const committedOpponentPath = isChaser ? committedEvaderPath : committedChaserPath
 
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
@@ -246,10 +230,10 @@ function GameView({
         opponentPos={opponentPos}
         prevMyPath={prevMyPath}
         prevOpponentPath={prevOpponentPath}
-        committedMyPath={committedMyPath}
-        committedOpponentPath={committedOpponentPath}
+        committedMyPath={null}
+        committedOpponentPath={null}
         isChaser={isChaser}
-        obstacles={gameState.obstacles}
+        elevations={gameState.elevations}
         walls={gameState.walls}
         showCoords={showCoords}
         currentStep={currentStep}
@@ -289,12 +273,11 @@ function GameView({
           )}
         </div>
       ) : (
-        <div className="w-full max-w-sm" key={`${gameState.turn}-${gameState.phase}`}>
+        <div className="w-full max-w-sm" key={gameState.turn}>
           <PlanningPanel
             isChaser={isChaser}
             turn={gameState.turn}
             maxTurns={maxTurns}
-            phase={gameState.phase}
             schema={schema}
             currentStep={currentStep}
             draft={draft}

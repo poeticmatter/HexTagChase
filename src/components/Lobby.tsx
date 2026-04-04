@@ -1,26 +1,20 @@
 import { useState } from 'react'
-import { BONUS_TIMING_OPTIONS } from '../lib/matchConfig'
-import type { LobbySettings, BonusTiming } from '../lib/matchConfig'
+import type { LobbySettings } from '../lib/matchConfig'
 import { mapRegistry } from '../lib/mapRegistry'
 import { MapThumbnail } from './MapThumbnail'
 
 interface LobbyFormState {
   maxTurns: number
   hostRole: 'Chaser' | 'Evader'
-  bonusTiming: BonusTiming
+  baseMovement: 1 | 2
   mapId: string
 }
 
 const DEFAULT_FORM: LobbyFormState = {
   maxTurns: 15,
   hostRole: 'Chaser',
-  bonusTiming: 'pre-commit',
+  baseMovement: 2,
   mapId: mapRegistry.getAllMaps()[0].id,
-}
-
-const BONUS_TIMING_DESCRIPTIONS: Record<BonusTiming, string> = {
-  'pre-commit': 'Both players pre-commit a bonus move. Chaser prediction hit → chaser bonus; miss → evader bonus.',
-  'post-reveal': 'Moves resolve first. Then only the entitled player selects their bonus move.',
 }
 
 interface Props {
@@ -85,18 +79,18 @@ export function Lobby({ onCreateGame }: Props) {
           </div>
         </div>
 
-        {/* Bonus timing */}
+        {/* Base movement */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-            Bonus Timing
+            Base Movement
           </label>
           <div className="flex rounded-lg overflow-hidden border border-neutral-700">
-            {BONUS_TIMING_OPTIONS.map(option => (
+            {([1, 2] as const).map(option => (
               <button
                 key={option}
-                onClick={() => setForm(f => ({ ...f, bonusTiming: option }))}
+                onClick={() => setForm(f => ({ ...f, baseMovement: option }))}
                 className={`flex-1 py-2 text-sm font-semibold transition-colors ${
-                  form.bonusTiming === option
+                  form.baseMovement === option
                     ? 'bg-neutral-600 text-white'
                     : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
                 }`}
@@ -106,7 +100,7 @@ export function Lobby({ onCreateGame }: Props) {
             ))}
           </div>
           <p className="text-xs text-neutral-500 leading-relaxed">
-            {BONUS_TIMING_DESCRIPTIONS[form.bonusTiming]}
+            Base movement points per turn.
           </p>
         </div>
 

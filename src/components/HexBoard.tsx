@@ -2,7 +2,7 @@ import { type JSX } from 'react'
 import { motion } from 'motion/react'
 import type { HexCoord, WallCoord } from '../types'
 import { hexToPixel, getAllHexes, HEX_RADIUS } from '../lib/hexGrid'
-import { obstacleSet } from '../lib/hexGameLogic'
+import { getBaseElevation, tileRand } from '../lib/topography'
 import type { DraftPlan } from './PlanningPanel'
 import type { UIStep } from '../types'
 
@@ -24,24 +24,27 @@ const MOSS_TONES = ['#4a7c3a', '#3d6b2e', '#5a8a48', '#466e38', '#527842', '#3f5
 
 function hexKey(h: HexCoord): string { return `${h.q},${h.r}` }
 
-/** Deterministic pseudo-random in [0, 1) for a given hex cell. */
-function tileRand(q: number, r: number): number {
-  let h = ((q * 2654435761) ^ (r * 2246822519)) >>> 0
-  h = (((h >>> 16) ^ h) * 0x45d9f3b) >>> 0
-  // Mask to 16 bits then divide by 2^16 to guarantee [0, 1)
-  return ((h >>> 16) & 0xffff) / 0x10000
-}
-
-function tileElevation(q: number, r: number, isObstacle: boolean, isOrtho: boolean = false): number {
+/**
+ * Calculates visual elevation based on the game-logic integer base level plus PRNG noise.
+ * Note: Base elevation 0 visually corresponds to 11px. Base elevation 1 is 26px.
+ * The scaling handles higher elevations by adding an offset per level.
+ */
+function tileVisualElevation(q: number, r: number, baseLevel: number, isOrtho: boolean = false): number {
   if (isOrtho) return 0
   const rand = tileRand(q, r)
-  if (isObstacle) return 26 + (rand - 0.5) * 4 // OBS_ELEV = 26
-  return 11 + (rand - 0.5) * 2 * 3 // BASE_ELEV = 11, ELEV_VAR = 3
+
+  if (baseLevel === 0) {
+    return 11 + (rand - 0.5) * 2 * 3 // BASE_ELEV = 11, ELEV_VAR = 3
+  } else {
+    // For level >= 1, we match the old "obstacle" look (26px) for level 1
+    // and stack higher for level 2+
+    return 26 + ((baseLevel - 1) * 15) + (rand - 0.5) * 4
+  }
 }
 
-function tileTopColor(q: number, r: number, isObstacle: boolean): string {
+function tileTopColor(q: number, r: number, baseLevel: number): string {
   const rand = tileRand(q * 13, r * 7)
-  if (isObstacle) return OBS_TOPS[Math.floor(rand * OBS_TOPS.length)]
+  if (baseLevel > 0) return OBS_TOPS[Math.floor(rand * OBS_TOPS.length)]
   return ROCK_TOPS[Math.floor(rand * ROCK_TOPS.length)]
 }
 
@@ -249,11 +252,11 @@ interface Props {
   opponentPos: HexCoord
   prevMyPath: HexCoord[] | null
   prevOpponentPath: HexCoord[] | null
-  /** Committed movement paths for this turn (post-reveal bonus_phase display). */
+  /** Committed movement paths for this turn */
   committedMyPath: HexCoord[] | null
   committedOpponentPath: HexCoord[] | null
   isChaser: boolean
-  obstacles: HexCoord[]
+  elevations: Record<string, number>
   walls: WallCoord[]
   currentStep: UIStep | 'ready'
   draft: DraftPlan
@@ -274,7 +277,7 @@ export function HexBoard({
   myPos, opponentPos,
   prevMyPath, prevOpponentPath,
   committedMyPath, committedOpponentPath,
-  isChaser, obstacles, walls,
+  isChaser, elevations, walls,
   currentStep, draft, waitingForPartner, winner,
   showCoords, validTargets, onHexClick,
   isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle
@@ -282,26 +285,25 @@ export function HexBoard({
   const isoY = isOrthographic ? 1.0 : 0.55
   const { width, height, offsetX, offsetY } = boardDimensions(isoY)
 
-  const obstacleKeys = obstacleSet(obstacles)
-
   const myColor       = isChaser ? '#ef4444' : '#3b82f6'
   const opponentColor = isChaser ? '#3b82f6' : '#ef4444'
-  const bonusColor    = '#22c55e'
 
   /** Screen coordinates of the top surface center of a tile. */
   function tileSurface(q: number, r: number) {
     const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
-    const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
+    const baseLevel = getBaseElevation(q, r, elevations)
+    const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
     return { x: cx, y: cy - elev }
   }
 
   // ── Build unified render queue ───────────────────────────────────────────────
 
-  // Precompute elevations for O(1) shadow lookups — built once, shared by all renderHex calls
+  // Precompute visual elevations for O(1) shadow lookups — built once, shared by all renderHex calls
   const allHexes = getAllHexes().sort((a, b) => tileDepth(a.q, a.r) - tileDepth(b.q, b.r))
-  const elevMap = new Map<string, number>()
+  const visElevMap = new Map<string, number>()
   for (const { q, r } of allHexes) {
-    elevMap.set(`${q},${r}`, tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic))
+    const baseLevel = getBaseElevation(q, r, elevations)
+    visElevMap.set(`${q},${r}`, tileVisualElevation(q, r, baseLevel, isOrthographic))
   }
 
   /**
@@ -315,7 +317,7 @@ export function HexBoard({
    */
   function shadowDecals(q: number, r: number, cx: number, cy: number, elev: number): JSX.Element | null {
     if (isOrthographic) return null
-    const currentElev = elevMap.get(`${q},${r}`) ?? 11 // BASE_ELEV
+    const currentElev = visElevMap.get(`${q},${r}`) ?? 11 // BASE_ELEV
     const v = topFaceCoords(cx, cy, elev, HEX_SIZE, isoY)
     const polys: JSX.Element[] = []
 
@@ -331,7 +333,7 @@ export function HexBoard({
     }
 
     // Dir 6 (dq=-1, dr=0): upper-left neighbor shares edge v3→v4
-    const dir6Elev = elevMap.get(`${q - 1},${r}`)
+    const dir6Elev = visElevMap.get(`${q - 1},${r}`)
     if (dir6Elev !== undefined) {
       const diff = Math.max(0, dir6Elev - currentElev)
       if (diff > 0) {
@@ -343,7 +345,7 @@ export function HexBoard({
     }
 
     // Dir 1 (dq=0, dr=-1): straight-up neighbor shares edge v4→v5
-    const dir1Elev = elevMap.get(`${q},${r - 1}`)
+    const dir1Elev = visElevMap.get(`${q},${r - 1}`)
     if (dir1Elev !== undefined) {
       const diff = Math.max(0, dir1Elev - currentElev)
       if (diff > 0) {
@@ -419,9 +421,6 @@ export function HexBoard({
   if (draft.predictDest)
     enqueueSingleArrow(opponentPos, draft.predictDest, '#a855f7', 0.65, 'arrow-pred', '5 3', 'draft-pred')
 
-  if (draft.bonusMove)
-    enqueueSingleArrow(draft.moveDest ?? myPos, draft.bonusMove, bonusColor, 0.75, 'arrow-bonus', '5 3', 'draft-bonus')
-
   renderQueue.sort((a, b) => a.depth - b.depth)
 
   // ── JSX renderers for each Renderable type ───────────────────────────────────
@@ -430,18 +429,17 @@ export function HexBoard({
     const key = `hex-${q},${r}`
     const coordKey = `${q},${r}`
     const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
-    const isObstacle  = obstacleKeys.has(coordKey)
+    const baseLevel   = getBaseElevation(q, r, elevations)
     const isValid     = validTargets.has(coordKey)
     const isMovePick  = !!(draft.moveDest    && hexKey(draft.moveDest)    === coordKey)
-    const isBonusPick = !!(draft.bonusMove   && hexKey(draft.bonusMove)   === coordKey)
     const isPredPick  = !!(draft.predictDest && hexKey(draft.predictDest) === coordKey)
 
-    const elev = tileElevation(q, r, isObstacle, isOrthographic)
+    const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
 
-    let topColor = tileTopColor(q, r, isObstacle)
+    let topColor = tileTopColor(q, r, baseLevel)
     if (!suppressValidHighlight) {
       if (isValid)                   topColor = '#5d9ab5'
-      if (isMovePick || isBonusPick) topColor = '#3d9e6a'
+      if (isMovePick)                topColor = '#3d9e6a'
       if (isPredPick)                topColor = '#8b5cc4'
     }
 
@@ -453,10 +451,10 @@ export function HexBoard({
     let topStrokeW = 0
     if (!suppressValidHighlight) {
       if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
-      if (isMovePick || isBonusPick) { topStroke = '#6edba0'; topStrokeW = 1.5 }
+      if (isMovePick)                { topStroke = '#6edba0'; topStrokeW = 1.5 }
       if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
     }
-    if (suppressValidHighlight && isObstacle) { topStroke = '#f97316'; topStrokeW = 2.5 }
+    if (suppressValidHighlight && baseLevel > 0) { topStroke = '#f97316'; topStrokeW = 2.5 }
 
     return (
       <g
@@ -533,7 +531,7 @@ export function HexBoard({
         })()}
 
         {/* Moss / seaweed in edge cracks — only on plain, non-interactive tiles */}
-        {!isOrthographic && !isObstacle && !isValid && !isMovePick && !isBonusPick && !isPredPick
+        {!isOrthographic && baseLevel === 0 && !isValid && !isMovePick && !isPredPick
           && mossEdgeAccents(cx, cy, elev, q, r, isoY)}
 
         {showCoords && (
@@ -541,7 +539,7 @@ export function HexBoard({
             x={cx} y={cy - elev + 1}
             textAnchor="middle" dominantBaseline="middle"
             fontSize={9} fontWeight="600"
-            fill={isObstacle ? '#c4a898' : '#d4cec8'}
+            fill={baseLevel > 0 ? '#c4a898' : '#d4cec8'}
             style={{ pointerEvents: 'none', userSelect: 'none' }}
           >
             {q},{r}
@@ -552,8 +550,10 @@ export function HexBoard({
   }
 
   function renderWall({ wall: { q1, r1, q2, r2 } }: RenderableWall) {
-    const elev1 = tileElevation(q1, r1, obstacleKeys.has(`${q1},${r1}`), isOrthographic)
-    const elev2 = tileElevation(q2, r2, obstacleKeys.has(`${q2},${r2}`), isOrthographic)
+    const baseLevel1 = getBaseElevation(q1, r1, elevations)
+    const baseLevel2 = getBaseElevation(q2, r2, elevations)
+    const elev1 = tileVisualElevation(q1, r1, baseLevel1, isOrthographic)
+    const elev2 = tileVisualElevation(q2, r2, baseLevel2, isOrthographic)
     // Sit the wall on the higher of the two adjacent tile surfaces
     const elev = Math.max(elev1, elev2)
     const e = wallEdgeIso(q1, r1, q2, r2, elev, offsetX, offsetY, isoY)
@@ -642,7 +642,8 @@ export function HexBoard({
         {/* Per-hex clip paths for shadow decals — one per tile, keyed by offset coords */}
         {allHexes.map(({ q, r }) => {
           const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
-          const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
+          const baseLevel = getBaseElevation(q, r, elevations)
+          const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
           return (
             <clipPath key={`cp-${q},${r}`} id={`clip-${q + 10}-${r + 10}`}>
               <polygon points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)} />
@@ -654,7 +655,6 @@ export function HexBoard({
         {([
           ['arrow-move',         myColor,       1.0],
           ['arrow-pred',         '#a855f7',     0.75],
-          ['arrow-bonus',        bonusColor,    1.0],
           ['arrow-last-my',      myColor,       0.5],
           ['arrow-last-opp',     opponentColor, 0.5],
           ['arrow-commit-my',    myColor,       1.0],
@@ -678,7 +678,8 @@ export function HexBoard({
       */}
       {!isOrthographic && allHexes.map(({ q, r }) => {
         const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
-        const elev = tileElevation(q, r, obstacleKeys.has(`${q},${r}`), isOrthographic)
+        const baseLevel = getBaseElevation(q, r, elevations)
+        const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
         const sdx = 2 + elev * 0.20
         const sdy = 4 + elev * 0.34
         const pts = hexVertOffsets(HEX_SIZE, isoY)
