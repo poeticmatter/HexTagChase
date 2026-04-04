@@ -230,10 +230,10 @@ export function MapEditor() {
           committedMyPath={null}
           committedOpponentPath={null}
           isChaser={true}
-          obstacles={obstacleArray}
+          elevations={Object.fromEntries(obstacleArray.map(o => [`${o.q},${o.r}`, 1]))}
           walls={wallArray}
           currentStep="ready"
-          draft={{ moveDest: null, movePath: null, predictDest: null, bonusMove: null }}
+          draft={{ moveDest: null, movePath: null, predictDest: null }}
           waitingForPartner={false}
           winner={null}
           showCoords={showCoords}

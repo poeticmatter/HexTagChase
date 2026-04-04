@@ -68,6 +68,19 @@ export function validateMapDefinition(raw: unknown, filePath: string): MapDefini
     }
   }
 
+  if (m.elevations !== undefined) {
+    if (typeof m.elevations !== 'object' || m.elevations === null || Array.isArray(m.elevations)) {
+      console.warn(`[MapRegistry] ${filePath}: 'elevations' must be an object map — skipping.`)
+      return null
+    }
+    for (const [key, val] of Object.entries(m.elevations as Record<string, unknown>)) {
+      if (typeof val !== 'number' || !Number.isInteger(val)) {
+        console.warn(`[MapRegistry] ${filePath}: elevation for ${key} is not an integer — skipping.`)
+        return null
+      }
+    }
+  }
+
   if (!Array.isArray(m.walls)) {
     console.warn(`[MapRegistry] ${filePath}: 'walls' must be an array — skipping.`)
     return null
@@ -101,6 +114,7 @@ export function validateMapDefinition(raw: unknown, filePath: string): MapDefini
     chaserStart: m.chaserStart as HexCoord,
     evaderStart: m.evaderStart as HexCoord,
     obstacles: m.obstacles as HexCoord[],
+    elevations: m.elevations as Record<string, number> | undefined,
     walls: m.walls as WallCoord[],
   }
 }

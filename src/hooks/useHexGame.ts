@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
-import type { GameState, TurnPlan, ConnectionStatus, MatchSettings, GamePhase } from '../types'
+import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
 import { processPhase, buildPlanningSchema, buildNextRoundState } from '../lib/hexGameLogic'
 import { mapRegistry } from '../lib/mapRegistry'
 
@@ -42,18 +42,22 @@ type PeerMessage =
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
   /**
    * Sent by a reconnecting client to request the host's authoritative state.
-   * lastTurn / lastPhase are the client's last known sequence position, used
+   * lastTurn is the client's last known sequence position, used
    * by the host to detect stale injection attempts.
    */
-  | { type: 'REQUEST_STATE'; lastTurn: number; lastPhase: GamePhase }
+  | { type: 'REQUEST_STATE'; lastTurn: number }
 
 // ── State builder ─────────────────────────────────────────────────────────────
+
+import { buildElevationsMap } from '../lib/topography'
 
 function buildInitialState(settings: MatchSettings): GameState {
   const mapDef = mapRegistry.getMapById(settings.mapId)
   if (!mapDef) {
     throw new Error(`Map with id "${settings.mapId}" not found in registry.`)
   }
+
+  const elevations = buildElevationsMap(mapDef)
 
   return {
     settings,
@@ -62,13 +66,15 @@ function buildInitialState(settings: MatchSettings): GameState {
     evaderPos: mapDef.evaderStart,
     prevChaserPath: null,
     prevEvaderPath: null,
-    phase: 'planning',
     turn: 1,
     winner: null,
     obstacles: mapDef.obstacles,
+    elevations,
     walls: mapDef.walls,
+    p1Budget: settings.baseMovement ?? 2,
+    p2Budget: settings.baseMovement ?? 2,
     transientContext: {},
-    turnSchema: buildPlanningSchema(settings),
+    turnSchema: buildPlanningSchema(),
     p1TurnData: {},
     p2TurnData: {},
     lastResolution: null,
@@ -171,14 +177,11 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
             // host. The only way this could occur is a stale or malformed
             // packet — sending the host state back would roll back progress.
             const clientIsAhead =
-              msg.lastTurn > current.turn ||
-              (msg.lastTurn === current.turn &&
-                msg.lastPhase === 'bonus_phase' &&
-                current.phase === 'planning')
+              msg.lastTurn > current.turn
 
             if (clientIsAhead) {
               console.warn(
-                `[useHexGame] REQUEST_STATE rejected: client at (turn=${msg.lastTurn}, phase=${msg.lastPhase}) is ahead of host at (turn=${current.turn}, phase=${current.phase}).`
+                `[useHexGame] REQUEST_STATE rejected: client at (turn=${msg.lastTurn}) is ahead of host at (turn=${current.turn}).`
               )
               return
             }
@@ -195,8 +198,8 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
           if (msg.type !== 'SUBMIT_PLAN') return
 
-          // Implicit ACK: discard stale packets from a previous turn/phase.
-          if (msg.plan.turn !== current.turn || msg.plan.phase !== current.phase) return
+          // Implicit ACK: discard stale packets from a previous turn.
+          if (msg.plan.turn !== current.turn) return
 
           live.current.clientPendingPlan = msg.plan
           checkExecutionTrigger()
@@ -275,7 +278,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
               conn.send({
                 type: 'REQUEST_STATE',
                 lastTurn: lastState?.turn ?? 0,
-                lastPhase: lastState?.phase ?? 'planning',
               } as PeerMessage)
             }
           })

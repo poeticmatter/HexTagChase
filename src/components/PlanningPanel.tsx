@@ -1,18 +1,15 @@
-import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, GamePhase } from '../types'
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep } from '../types'
 
 export interface DraftPlan {
   moveDest: HexCoord | null
   movePath: HexCoord[] | null
   predictDest: HexCoord | null
-  bonusMove: HexCoord | null
 }
 
-/** select_bonus is optional — the player may confirm without choosing a bonus hex. */
 function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
   for (const step of schema.requiredSteps) {
     if (step === 'select_movement' && !draft.moveDest) return false
     if (step === 'select_prediction' && !draft.predictDest) return false
-    // select_bonus is intentionally not required for completion
   }
   return true
 }
@@ -21,36 +18,28 @@ function draftToTurnPlan(
   draft: DraftPlan,
   schema: TurnSchema,
   turn: number,
-  phase: GamePhase,
   isChaser: boolean,
 ): TurnPlan | null {
   if (!isDraftComplete(draft, schema)) return null
 
-  if (phase === 'bonus_phase') {
-    return { type: 'bonus', turn, phase: 'bonus_phase', bonusMove: draft.bonusMove }
-  }
+  if (!draft.moveDest || !draft.movePath || !draft.predictDest) return null
 
   if (isChaser) {
-    if (!draft.moveDest || !draft.movePath || !draft.predictDest) return null
     return {
       type: 'chaser',
       turn,
-      phase,
       moveDest: draft.moveDest,
       movePath: draft.movePath,
       predictDest: draft.predictDest,
-      ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
     }
   }
 
-  if (!draft.moveDest || !draft.movePath) return null
   return {
     type: 'evader',
     turn,
-    phase,
     moveDest: draft.moveDest,
     movePath: draft.movePath,
-    ...(draft.bonusMove !== null ? { bonusMove: draft.bonusMove } : {}),
+    predictDest: draft.predictDest,
   }
 }
 
@@ -62,27 +51,24 @@ interface ResolutionBannerProps {
 }
 
 function ResolutionBanner({ resolution, isChaser }: ResolutionBannerProps) {
-  const { chaserPredHit, bonusUsedBy } = resolution
+  const { chaserPredHit, evaderPredHit } = resolution
 
-  const predLabel = chaserPredHit ? 'Hit' : 'Miss'
-  const predColor = chaserPredHit ? 'text-green-400' : 'text-neutral-500'
+  const chaserPredLabel = chaserPredHit ? 'Hit' : 'Miss'
+  const chaserPredColor = chaserPredHit ? 'text-green-400' : 'text-neutral-500'
 
-  const bonusLabel = bonusUsedBy === null
-    ? 'No bonus'
-    : bonusUsedBy === 'chaser'
-      ? isChaser ? 'You used bonus' : 'Opponent used bonus'
-      : isChaser ? 'Opponent used bonus' : 'You used bonus'
+  const evaderPredLabel = evaderPredHit ? 'Hit' : 'Miss'
+  const evaderPredColor = evaderPredHit ? 'text-green-400' : 'text-neutral-500'
 
   return (
     <div className="rounded-xl border border-neutral-700 bg-neutral-800/50 p-3 text-xs flex flex-col gap-2">
       <p className="text-neutral-400 font-semibold text-center uppercase tracking-wider">Last turn</p>
       <div className="flex justify-between">
         <span className="text-neutral-500">Chaser prediction:</span>
-        <span className={predColor}>{predLabel}</span>
+        <span className={chaserPredColor}>{chaserPredLabel}</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-neutral-500">Bonus:</span>
-        <span className="text-neutral-400">{bonusLabel}</span>
+        <span className="text-neutral-500">Evader prediction:</span>
+        <span className={evaderPredColor}>{evaderPredLabel}</span>
       </div>
     </div>
   )
@@ -93,7 +79,6 @@ function ResolutionBanner({ resolution, isChaser }: ResolutionBannerProps) {
 const STEP_LABELS: Record<UIStep | 'ready', string> = {
   select_movement:  'Click your destination',
   select_prediction: 'Predict opponent destination',
-  select_bonus:     'Select bonus move (optional)',
   ready:            'Ready to confirm',
 }
 
@@ -129,7 +114,6 @@ function buildSteps(
     let done = false
     if (step === 'select_movement')  done = !!draft.moveDest
     if (step === 'select_prediction') done = !!draft.predictDest
-    if (step === 'select_bonus')     done = !!draft.bonusMove
 
     return { label: STEP_LABELS[step], done, active: currentStep === step }
   })
@@ -141,7 +125,6 @@ interface Props {
   isChaser: boolean
   turn: number
   maxTurns: number
-  phase: GamePhase
   draft: DraftPlan
   schema: TurnSchema
   currentStep: UIStep | 'ready'
@@ -155,7 +138,6 @@ export function PlanningPanel({
   isChaser,
   turn,
   maxTurns,
-  phase,
   draft,
   schema,
   currentStep,
@@ -198,7 +180,7 @@ export function PlanningPanel({
       {/* Planning steps */}
       <div className="rounded-xl border border-neutral-700 bg-neutral-800/40 p-3 flex flex-col gap-2">
         <p className="text-xs text-neutral-400 font-semibold text-center uppercase tracking-wider mb-1">
-          {phase === 'bonus_phase' ? 'Bonus Move' : STEP_LABELS[currentStep]}
+          {STEP_LABELS[currentStep]}
         </p>
         {steps.map(s => (
           <div key={s.label}>
@@ -216,7 +198,7 @@ export function PlanningPanel({
         </button>
         <button
           onClick={() => {
-            const plan = draftToTurnPlan(draft, schema, turn, phase, isChaser)
+            const plan = draftToTurnPlan(draft, schema, turn, isChaser)
             if (plan) onConfirm(plan)
           }}
           disabled={!isComplete}
@@ -226,7 +208,7 @@ export function PlanningPanel({
               : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'
           }`}
         >
-          {currentStep === 'select_bonus' && draft.bonusMove === null ? 'Skip Bonus' : 'Confirm'}
+          Confirm
         </button>
       </div>
     </div>

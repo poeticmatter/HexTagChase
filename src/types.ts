@@ -10,78 +10,54 @@ export interface WallCoord {
 
 export type Role = 'chaser' | 'evader'
 
-export type BonusTiming = 'pre-commit' | 'post-reveal'
-
 export interface MapDefinition {
   id: string
   name: string
   chaserStart: HexCoord
   evaderStart: HexCoord
   obstacles: HexCoord[]
+  elevations?: Record<string, number>
   walls: WallCoord[]
 }
 
 export interface MatchSettings {
   maxTurns: number
   chaserPlayer: 1 | 2
-  bonusTiming: BonusTiming
+  baseMovement: 1 | 2
   mapId: string
 }
 
-export type GamePhase = 'planning' | 'bonus_phase'
+// ── Symmetrical turn plans ─────────────────────────────────────────────────────
 
-// ── Asymmetric turn plans ─────────────────────────────────────────────────────
-
-/** Chaser's planning-phase plan: move + prediction + optional pre-committed bonus. */
 export interface ChaserPlan {
   type: 'chaser'
   turn: number
-  phase: GamePhase
   moveDest: HexCoord
   movePath: HexCoord[]
   predictDest: HexCoord
-  bonusMove?: HexCoord
 }
 
-/** Evader's planning-phase plan: move only + optional pre-committed bonus. */
 export interface EvaderPlan {
   type: 'evader'
   turn: number
-  phase: GamePhase
   moveDest: HexCoord
   movePath: HexCoord[]
-  bonusMove?: HexCoord
+  predictDest: HexCoord
 }
 
-/** Post-reveal bonus phase: the entitled player selects their bonus move (null = skip). */
-export interface BonusPlan {
-  type: 'bonus'
-  turn: number
-  phase: 'bonus_phase'
-  bonusMove: HexCoord | null
-}
-
-export type TurnPlan = ChaserPlan | EvaderPlan | BonusPlan
+export type TurnPlan = ChaserPlan | EvaderPlan
 
 // ── State machine & UI ────────────────────────────────────────────────────────
 
 export type UIStep =
   | 'select_movement'
   | 'select_prediction'
-  | 'select_bonus'
 
 export interface TurnSchema {
   requiredSteps: UIStep[]
 }
 
 export interface TransientContext {
-  /** post-reveal: which role submits the bonus plan in bonus_phase */
-  bonusEntitledRole?: Role
-  /** post-reveal: cached for bonus_phase resolution */
-  chaserPredHit?: boolean
-  /** post-reveal: committed movement paths (include start pos as first element) */
-  committedChaserPath?: HexCoord[] | null
-  committedEvaderPath?: HexCoord[] | null
 }
 
 export interface PlayerTurnData {
@@ -91,7 +67,7 @@ export interface PlayerTurnData {
 
 export interface ResolutionSummary {
   chaserPredHit: boolean
-  bonusUsedBy: Role | null
+  evaderPredHit: boolean
 }
 
 export interface MatchState {
@@ -107,11 +83,13 @@ export interface GameState {
   evaderPos: HexCoord
   prevChaserPath: HexCoord[] | null
   prevEvaderPath: HexCoord[] | null
-  phase: GamePhase
   turn: number
   winner: Role | null
   obstacles: HexCoord[]
+  elevations: Record<string, number>
   walls: WallCoord[]
+  p1Budget: number
+  p2Budget: number
   transientContext: TransientContext
   turnSchema: Record<Role, TurnSchema>
   p1TurnData: PlayerTurnData
