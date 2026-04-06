@@ -19,9 +19,10 @@ const DEFAULT_FORM: LobbyFormState = {
 
 interface Props {
   onCreateGame: (settings: LobbySettings) => void
+  onOpenSimulator?: () => void
 }
 
-export function Lobby({ onCreateGame }: Props) {
+export function Lobby({ onCreateGame, onOpenSimulator }: Props) {
   const [form, setForm] = useState<LobbyFormState>(DEFAULT_FORM)
 
   return (
@@ -124,6 +125,15 @@ export function Lobby({ onCreateGame }: Props) {
       </div>
 
       <div className="flex gap-4 mt-2">
+        {onOpenSimulator && (
+          <button
+            onClick={onOpenSimulator}
+            className="px-6 py-3 bg-indigo-700 hover:bg-indigo-600 rounded-xl text-neutral-200 font-semibold text-sm transition-colors"
+          >
+            Simulate
+          </button>
+        )}
+
         <button
           onClick={() => { window.location.href = '?editor=true' }}
           className="px-6 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-neutral-200 font-semibold text-sm transition-colors"

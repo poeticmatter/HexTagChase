@@ -250,6 +250,8 @@ function wallEdgeIso(
 interface Props {
   myPos: HexCoord
   opponentPos: HexCoord
+  heatmapData?: Map<string, { intensity: number; label?: string }>
+  heatmapColor?: string
   prevMyPath: HexCoord[] | null
   prevOpponentPath: HexCoord[] | null
   /** Committed movement paths for this turn */
@@ -280,7 +282,8 @@ export function HexBoard({
   isChaser, elevations, walls,
   currentStep, draft, waitingForPartner, winner,
   showCoords, validTargets, onHexClick,
-  isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle
+  isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle,
+  heatmapData, heatmapColor = '#ef4444'
 }: Props) {
   const isoY = isOrthographic ? 1.0 : 0.55
   const { width, height, offsetX, offsetY } = boardDimensions(isoY)
@@ -694,6 +697,42 @@ export function HexBoard({
         if (item.type === 'wall') return renderWall(item)
         return renderPath(item)
       })}
+
+      {/* ── Heatmap Overlay (Rendered as a separate pass over all tiles) ── */}
+      {heatmapData && (
+        <g style={{ pointerEvents: 'none' }}>
+          {allHexes.map(({ q, r }) => {
+            const coordKey = `${q},${r}`
+            const data = heatmapData.get(coordKey)
+            if (!data) return null
+
+            const { cx, cy } = isoCenter(q, r, offsetX, offsetY, isoY)
+            const baseLevel = getBaseElevation(q, r, elevations)
+            const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
+
+            return (
+              <g key={`heatmap-${coordKey}`}>
+                <polygon
+                  points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)}
+                  fill={heatmapColor}
+                  fillOpacity={data.intensity}
+                />
+                {data.label && (
+                  <text
+                    x={cx} y={cy - elev - 8}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={10} fontWeight="700"
+                    fill="white"
+                    style={{ userSelect: 'none', textShadow: '0px 1px 2px black' }}
+                  >
+                    {data.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </g>
+      )}
 
       {/* ── Player cylinders ── */}
       {[
