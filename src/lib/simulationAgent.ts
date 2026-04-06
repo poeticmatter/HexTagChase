@@ -29,12 +29,12 @@ export function produceTurnPlan(
 
   // 1. Movement selection
   const { dest: moveDest, path: movePath } = agent === 'random'
-    ? pickRandom(myReachable)
+    ? pickRandom(myReachable, myPos)
     : pickGreedy(myReachable, oppPos, isChaser)
 
   // 2. Prediction selection (simulate what opponent would do)
   const predictDest = agent === 'random'
-    ? pickRandom(oppReachable).dest
+    ? pickRandom(oppReachable, oppPos).dest
     : pickGreedy(oppReachable, myPos, !isChaser).dest
 
   if (isChaser) {
@@ -58,8 +58,11 @@ export function produceTurnPlan(
 
 // ── Pure Selection Functions ──────────────────────────────────────────────────
 
-function pickRandom(reachable: Map<string, HexCoord[]>): { dest: HexCoord, path: HexCoord[] } {
+function pickRandom(reachable: Map<string, HexCoord[]>, fallback: HexCoord): { dest: HexCoord, path: HexCoord[] } {
   const reachableArray = Array.from(reachable.entries())
+  if (reachableArray.length === 0) {
+    return { dest: fallback, path: [] }
+  }
   const pick = reachableArray[Math.floor(Math.random() * reachableArray.length)]
   const [destKey, path] = pick
   const [q, r] = destKey.split(',').map(Number)

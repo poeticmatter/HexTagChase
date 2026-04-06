@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { MapThumbnail } from './MapThumbnail'
 import { HexBoard } from './HexBoard'
 import { mapRegistry } from '../lib/mapRegistry'
+import { buildElevationsMap } from '../lib/topography'
 import type { SimulationConfig, SimulationResult } from '../lib/simulationTypes'
 import { SimulationAgent } from '../lib/simulationAgent'
 import Worker from '../workers/simulationWorker?worker'
@@ -85,6 +86,10 @@ export function SimulatorView() {
 
   const mapDef = mapRegistry.getMapById(config.mapId)
 
+  const elevationsMap = useMemo(() => {
+    return mapDef ? buildElevationsMap(mapDef) : {}
+  }, [mapDef])
+
   const heatmapData = useMemo(() => {
     if (!result || !mapDef) return undefined
 
@@ -149,9 +154,9 @@ export function SimulatorView() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8 flex flex-col gap-6">
       <div className="flex items-center gap-4 border-b border-slate-700 pb-4">
-        <a href="/" className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded font-medium text-sm transition-colors">
+        <button onClick={() => window.location.href = window.location.pathname} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded font-medium text-sm transition-colors">
           &larr; Lobby
-        </a>
+        </button>
         <h1 className="text-2xl font-bold">Monte Carlo Simulator</h1>
       </div>
 
@@ -324,14 +329,14 @@ export function SimulatorView() {
                   <div className="flex-1 flex items-center justify-center overflow-hidden pt-12">
                     <div style={{ transform: 'scale(0.8)', transformOrigin: 'center center' }}>
                       <HexBoard
-                        myPos={{ q: 0, r: 0 }}
-                        opponentPos={{ q: 0, r: 0 }}
+                        myPos={mapDef.chaserStart}
+                        opponentPos={mapDef.evaderStart}
                         prevMyPath={null}
                         prevOpponentPath={null}
                         committedMyPath={null}
                         committedOpponentPath={null}
                         isChaser={true}
-                        elevations={mapDef.elevations || {}}
+                        elevations={elevationsMap}
                         walls={mapDef.walls}
                         currentStep="ready"
                         draft={{ moveDest: null, movePath: null, predictDest: null }}
