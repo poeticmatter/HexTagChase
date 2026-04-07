@@ -6,6 +6,7 @@ import type { DraftPlan } from './components/PlanningPanel'
 import type { TurnSchema, UIStep } from './types'
 import { Lobby } from './components/Lobby'
 import { MapEditor } from './components/MapEditor'
+import { SimulatorView } from './components/SimulatorView'
 import type { HexCoord, TurnPlan, MatchSettings } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
 import type { LobbySettings } from './lib/matchConfig'
@@ -297,7 +298,9 @@ function GameView({
 type RoomInfo = { code: string; role: 1 | 2; settings: MatchSettings | null }
 
 export default function App() {
-  const isEditor = new URLSearchParams(window.location.search).get('editor') === 'true'
+  const params = new URLSearchParams(window.location.search)
+  const isEditor = params.get('editor') === 'true'
+  const isSimulator = params.get('simulator') === 'true'
 
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(() => {
     const code = new URLSearchParams(window.location.search).get('room')
@@ -313,6 +316,7 @@ export default function App() {
   }, [])
 
   if (isEditor) return <MapEditor />
-  if (!roomInfo) return <Lobby onCreateGame={handleCreateGame} />
+  if (isSimulator) return <SimulatorView />
+  if (!roomInfo) return <Lobby onCreateGame={handleCreateGame} onOpenSimulator={() => { window.location.href = '?simulator=true' }} />
   return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} settings={roomInfo.settings} />
 }

@@ -10,6 +10,38 @@ import { mapRegistry } from './mapRegistry'
 
 // ── Obstacles ──────────────────────────────────────────────────────────────
 
+export function buildInitialState(settings: MatchSettings): GameState {
+  const mapDef = mapRegistry.getMapById(settings.mapId)
+  if (!mapDef) {
+    throw new Error(`Map with id "${settings.mapId}" not found in registry.`)
+  }
+
+  const elevations = buildElevationsMap(mapDef)
+
+  return {
+    settings,
+    matchState: { roundNumber: 1, history: [], matchWinner: null },
+    chaserPos: mapDef.chaserStart,
+    evaderPos: mapDef.evaderStart,
+    prevChaserPath: null,
+    prevEvaderPath: null,
+    turn: 1,
+    winner: null,
+    obstacles: mapDef.obstacles,
+    elevations,
+    walls: mapDef.walls,
+    p1Budget: settings.baseMovement ?? 2,
+    p2Budget: settings.baseMovement ?? 2,
+    transientContext: {},
+    turnSchema: buildPlanningSchema(),
+    p1TurnData: {},
+    p2TurnData: {},
+    lastResolution: null,
+  }
+}
+
+// ── Obstacles ──────────────────────────────────────────────────────────────
+
 export function obstacleSet(obstacles: HexCoord[]): Set<string> {
   return new Set(obstacles.map(h => `${h.q},${h.r}`))
 }

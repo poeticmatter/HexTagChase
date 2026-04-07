@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
 import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
-import { processPhase, buildPlanningSchema, buildNextRoundState } from '../lib/hexGameLogic'
-import { mapRegistry } from '../lib/mapRegistry'
+import { processPhase, buildNextRoundState, buildInitialState } from '../lib/hexGameLogic'
 
 // ── Reconnection policy ───────────────────────────────────────────────────────
 
@@ -46,40 +45,6 @@ type PeerMessage =
    * by the host to detect stale injection attempts.
    */
   | { type: 'REQUEST_STATE'; lastTurn: number }
-
-// ── State builder ─────────────────────────────────────────────────────────────
-
-import { buildElevationsMap } from '../lib/topography'
-
-function buildInitialState(settings: MatchSettings): GameState {
-  const mapDef = mapRegistry.getMapById(settings.mapId)
-  if (!mapDef) {
-    throw new Error(`Map with id "${settings.mapId}" not found in registry.`)
-  }
-
-  const elevations = buildElevationsMap(mapDef)
-
-  return {
-    settings,
-    matchState: { roundNumber: 1, history: [], matchWinner: null },
-    chaserPos: mapDef.chaserStart,
-    evaderPos: mapDef.evaderStart,
-    prevChaserPath: null,
-    prevEvaderPath: null,
-    turn: 1,
-    winner: null,
-    obstacles: mapDef.obstacles,
-    elevations,
-    walls: mapDef.walls,
-    p1Budget: settings.baseMovement ?? 2,
-    p2Budget: settings.baseMovement ?? 2,
-    transientContext: {},
-    turnSchema: buildPlanningSchema(),
-    p1TurnData: {},
-    p2TurnData: {},
-    lastResolution: null,
-  }
-}
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
