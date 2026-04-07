@@ -2,7 +2,7 @@ import { GameState, TurnPlan, Role, HexCoord } from '../types'
 import { reachableDestinations, buildWallSet } from './hexGameLogic'
 import { hexDistance } from './hexGrid'
 
-export type SimulationAgent = 'random' | 'greedy'
+export type SimulationAgent = 'random' | 'greedy' | 'lookahead'
 
 /**
  * Produces a complete turn plan (movement + prediction) for a given agent strategy.
@@ -30,6 +30,8 @@ export function produceTurnPlan(
   // 1. Movement selection
   const { dest: moveDest, path: movePath } = agent === 'random'
     ? pickRandom(myReachable, myPos)
+    : agent === 'lookahead'
+    ? pickLookahead(myReachable, oppPos, oppReachable, isChaser)
     : pickGreedy(myReachable, oppPos, isChaser)
 
   // 2. Prediction selection (simulate what opponent would do)
@@ -67,6 +69,47 @@ function pickRandom(reachable: Map<string, HexCoord[]>, fallback: HexCoord): { d
   const [destKey, path] = pick
   const [q, r] = destKey.split(',').map(Number)
   return { dest: { q, r }, path }
+}
+
+function pickLookahead(
+  myReachable: Map<string, HexCoord[]>,
+  oppPos: HexCoord,
+  oppReachable: Map<string, HexCoord[]>,
+  minimizeDistance: boolean
+): { dest: HexCoord, path: HexCoord[] } {
+  let bestScore = minimizeDistance ? Infinity : -Infinity
+  let bestPicks: Array<{ dest: HexCoord, path: HexCoord[] }> = []
+
+  for (const [destKey, path] of myReachable.entries()) {
+    const [q, r] = destKey.split(',').map(Number)
+    const candidateDest: HexCoord = { q, r }
+
+    // Model opponent's greedy response to us moving to candidateDest
+    const oppResponse = pickGreedy(oppReachable, candidateDest, !minimizeDistance)
+    const resultingDist = hexDistance(oppResponse.dest.q, oppResponse.dest.r, q, r)
+
+    if (minimizeDistance) {
+      if (resultingDist < bestScore) {
+        bestScore = resultingDist
+        bestPicks = [{ dest: candidateDest, path }]
+      } else if (resultingDist === bestScore) {
+        bestPicks.push({ dest: candidateDest, path })
+      }
+    } else {
+      if (resultingDist > bestScore) {
+        bestScore = resultingDist
+        bestPicks = [{ dest: candidateDest, path }]
+      } else if (resultingDist === bestScore) {
+        bestPicks.push({ dest: candidateDest, path })
+      }
+    }
+  }
+
+  if (bestPicks.length === 0) {
+    return pickGreedy(myReachable, oppPos, minimizeDistance)
+  }
+
+  return bestPicks[Math.floor(Math.random() * bestPicks.length)]
 }
 
 export function pickGreedy(

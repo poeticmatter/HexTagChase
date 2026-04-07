@@ -78,6 +78,19 @@ export function SimulatorView() {
     workerRef.current.postMessage(config)
   }
 
+  function handleExport() {
+    if (!result) return
+    const safeMapId = result.settings.mapId.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const filename = `simulation_${safeMapId}_${config.iterations}_${config.chaserStrategy}_vs_${config.evaderStrategy}.json`
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   function handleCancel() {
     workerRef.current?.terminate()
     workerRef.current = null
@@ -171,7 +184,7 @@ export function SimulatorView() {
               {mapRegistry.getAllMaps().map(map => (
                 <button
                   key={map.id}
-                  onClick={() => status === 'idle' && setConfig(c => ({ ...c, mapId: map.id }))}
+                  onClick={() => status !== 'running' && setConfig(c => ({ ...c, mapId: map.id }))}
                   disabled={status === 'running'}
                   className={`p-2 rounded border-2 transition-all text-left flex flex-col gap-2 ${
                     config.mapId === map.id
@@ -179,7 +192,7 @@ export function SimulatorView() {
                       : 'border-slate-700 hover:border-slate-500'
                   } ${status === 'running' ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <MapThumbnail mapDef={map} selected={false} onClick={() => {}} />
+                  <MapThumbnail mapDef={map} selected={config.mapId === map.id} onClick={() => {}} />
                   <span className="text-xs font-medium truncate w-full block">{map.name}</span>
                 </button>
               ))}
@@ -239,6 +252,7 @@ export function SimulatorView() {
               >
                 <option value="random">Random</option>
                 <option value="greedy">Greedy</option>
+                <option value="lookahead">Lookahead</option>
               </select>
             </div>
             <div className="flex flex-col gap-2">
@@ -251,6 +265,7 @@ export function SimulatorView() {
               >
                 <option value="random">Random</option>
                 <option value="greedy">Greedy</option>
+                <option value="lookahead">Lookahead</option>
               </select>
             </div>
           </div>
@@ -287,6 +302,14 @@ export function SimulatorView() {
           {result && mapDef && status === 'complete' ? (
             <>
               {/* Summary Stats */}
+              <div className="flex items-center justify-end mb-1">
+                <button
+                  onClick={handleExport}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded transition-colors"
+                >
+                  Export JSON
+                </button>
+              </div>
               <div className="grid grid-cols-4 gap-4">
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col items-center justify-center">
                   <span className="text-sm text-slate-400 mb-1">Chaser Win Rate</span>
