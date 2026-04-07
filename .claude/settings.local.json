@@ -4,7 +4,8 @@
       "Bash(grep -E \"\\\\.\\(tsx|ts|json|css\\)$\")",
       "Bash(cd:*)",
       "Bash(npm run:*)",
-      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
+      "Bash(git fetch:*)"
     ]
   }
 }
