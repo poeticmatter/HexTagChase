@@ -4,7 +4,7 @@ import type { HexCoord, WallCoord, MapDefinition } from '../types'
 import { HEX_RADIUS } from '../lib/hexGrid'
 import { buildWallSet } from '../lib/hexGameLogic'
 
-type EditorMode = 'obstacle' | 'wall' | 'chaser' | 'evader'
+type EditorMode = 'elevation' | 'wall' | 'chaser' | 'evader'
 
 const DEFAULT_MAP_NAME = 'Custom Arena'
 
@@ -39,13 +39,14 @@ function getLocalEdge(hexX: number, hexY: number, size: number): { dq: number, d
 
 export function MapEditor() {
   const [mapName, setMapName] = useState(DEFAULT_MAP_NAME)
-  const [mode, setMode] = useState<EditorMode>('obstacle')
+  const [mode, setMode] = useState<EditorMode>('elevation')
   const [isOrthographic, setIsOrthographic] = useState(true)
   const [showCoords, setShowCoords] = useState(true)
 
   const [chaserStart, setChaserStart] = useState<HexCoord>({ q: -3, r: 0 })
   const [evaderStart, setEvaderStart] = useState<HexCoord>({ q: 3, r: 0 })
-  const [obstacles, setObstacles] = useState<Set<string>>(new Set())
+  const [elevations, setElevations] = useState<Record<string, number>>({})
+  const [selectedElevation, setSelectedElevation] = useState<number>(1)
   const [walls, setWalls] = useState<Set<string>>(new Set())
 
   const validTargets = useMemo(() => {
@@ -65,33 +66,36 @@ export function MapEditor() {
     const key = hexKey(hex.q, hex.r)
 
     if (mode === 'chaser') {
-      if (!obstacles.has(key) && key !== hexKey(evaderStart.q, evaderStart.r)) {
+      if (elevations[key] !== -1 && key !== hexKey(evaderStart.q, evaderStart.r)) {
         setChaserStart(hex)
       }
       return
     }
 
     if (mode === 'evader') {
-      if (!obstacles.has(key) && key !== hexKey(chaserStart.q, chaserStart.r)) {
+      if (elevations[key] !== -1 && key !== hexKey(chaserStart.q, chaserStart.r)) {
         setEvaderStart(hex)
       }
       return
     }
 
-    if (mode === 'obstacle') {
+    if (mode === 'elevation') {
       if (key === hexKey(chaserStart.q, chaserStart.r) || key === hexKey(evaderStart.q, evaderStart.r)) {
-        return // Cannot place obstacle on start points
+        return // Cannot place elevation on start points
       }
 
-      setObstacles(prev => {
-        const next = new Set(prev)
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
+      setElevations(prev => {
+        const next = { ...prev }
+        if (next[key] === selectedElevation) {
+          delete next[key]
+        } else {
+          next[key] = selectedElevation
+        }
         return next
       })
       return
     }
-  }, [mode, chaserStart, evaderStart, obstacles])
+  }, [mode, chaserStart, evaderStart, elevations, selectedElevation])
 
   // Custom click handler wrapper to intercept click events for wall edge detection
   const wrapperClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
@@ -117,17 +121,13 @@ export function MapEditor() {
       return { q1: parts[0], r1: parts[1], q2: parts[2], r2: parts[3] }
     })
 
-    const obsArr: HexCoord[] = Array.from(obstacles).map((o: string) => {
-      const parts = o.split(',').map(Number)
-      return { q: parts[0], r: parts[1] }
-    })
-
     const def: MapDefinition = {
       id: mapName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       name: mapName,
       chaserStart,
       evaderStart,
-      obstacles: obsArr,
+      obstacles: [],
+      elevations,
       walls: wallArr
     }
 
@@ -138,10 +138,6 @@ export function MapEditor() {
   }
 
   // To display correctly in HexBoard, we need to convert Set<string> back to arrays
-  const obstacleArray = Array.from(obstacles).map((o: string) => {
-    const parts = o.split(',').map(Number)
-    return { q: parts[0], r: parts[1] }
-  })
 
   const wallArray = Array.from(walls).map((w: string) => {
     const parts = w.split(/[\|,]/).map(Number)
@@ -174,7 +170,38 @@ export function MapEditor() {
 
         <div className="flex flex-col gap-2">
           <label className="text-xs font-semibold text-neutral-400 uppercase">Tools</label>
-          {(['obstacle', 'wall', 'chaser', 'evader'] as EditorMode[]).map(m => (
+
+          <div className="flex flex-col gap-2 p-2 bg-neutral-900 rounded border border-neutral-700">
+            <span className="text-xs font-medium text-neutral-300">Elevation Brush</span>
+            <div className="flex gap-2 justify-between">
+              {[
+                { val: -1, bg: 'bg-[#0f0f1a]', label: '💀' },
+                { val: 0,  bg: 'bg-[#5a5248]', label: '0' },
+                { val: 1,  bg: 'bg-[#877c6e]', label: '1' },
+                { val: 2,  bg: 'bg-[#a89880]', label: '2' },
+                { val: 3,  bg: 'bg-[#c4b49a]', label: '3' },
+                { val: 4,  bg: 'bg-[#ddd0be]', label: '4' }
+              ].map(swatch => (
+                <button
+                  key={swatch.val}
+                  onClick={() => {
+                    setSelectedElevation(swatch.val)
+                    setMode('elevation')
+                  }}
+                  className={`w-8 h-8 rounded flex items-center justify-center text-xs shadow-sm transition-all ${swatch.bg} ${
+                    mode === 'elevation' && selectedElevation === swatch.val
+                      ? 'ring-2 ring-white scale-110 z-10'
+                      : 'ring-1 ring-neutral-700 hover:scale-105'
+                  }`}
+                  title={`Elevation ${swatch.val}`}
+                >
+                  <span className="opacity-90 font-bold drop-shadow-md">{swatch.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(['wall', 'chaser', 'evader'] as EditorMode[]).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -230,7 +257,7 @@ export function MapEditor() {
           committedMyPath={null}
           committedOpponentPath={null}
           isChaser={true}
-          elevations={Object.fromEntries(obstacleArray.map(o => [`${o.q},${o.r}`, 1]))}
+          elevations={elevations}
           walls={wallArray}
           currentStep="ready"
           draft={{ moveDest: null, movePath: null, predictDest: null }}

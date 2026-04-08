@@ -19,6 +19,8 @@ const SHADOW_VEC: [number, number] = [0.8, 0.5]
 const ROCK_TOPS  = ['#8c8275', '#877c6e', '#918070', '#7e7568', '#8a7f72', '#938679']
 const OBS_TOPS   = ['#6b5848', '#5e4f3d', '#735f4d', '#644f3e']
 const MOSS_TONES = ['#4a7c3a', '#3d6b2e', '#5a8a48', '#466e38', '#527842', '#3f5e30', '#618f50']
+const PIT_VOID   = ['#1a1a2e', '#16213e', '#0f0f1a']
+const PIT_WALLS  = ['#2a2a3e', '#1e1e30']
 
 // ── Per-tile utilities ────────────────────────────────────────────────────────
 
@@ -33,7 +35,9 @@ function tileVisualElevation(q: number, r: number, baseLevel: number, isOrtho: b
   if (isOrtho) return 0
   const rand = tileRand(q, r)
 
-  if (baseLevel === 0) {
+  if (baseLevel === -1) {
+    return -20 + (rand - 0.5) * 4
+  } else if (baseLevel === 0) {
     return 11 + (rand - 0.5) * 2 * 3 // BASE_ELEV = 11, ELEV_VAR = 3
   } else {
     // For level >= 1, we match the old "obstacle" look (26px) for level 1
@@ -44,6 +48,7 @@ function tileVisualElevation(q: number, r: number, baseLevel: number, isOrtho: b
 
 function tileTopColor(q: number, r: number, baseLevel: number): string {
   const rand = tileRand(q * 13, r * 7)
+  if (baseLevel === -1) return PIT_VOID[Math.floor(rand * PIT_VOID.length)]
   if (baseLevel > 0) return OBS_TOPS[Math.floor(rand * OBS_TOPS.length)]
   return ROCK_TOPS[Math.floor(rand * ROCK_TOPS.length)]
 }
@@ -440,23 +445,32 @@ export function HexBoard({
     const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
 
     let topColor = tileTopColor(q, r, baseLevel)
-    if (!suppressValidHighlight) {
+    if (!suppressValidHighlight && baseLevel !== -1) {
       if (isValid)                   topColor = '#5d9ab5'
       if (isMovePick)                topColor = '#3d9e6a'
       if (isPredPick)                topColor = '#8b5cc4'
     }
 
-    const sideR = darken(topColor, 0.68)
-    const sideB = darken(topColor, 0.55)
-    const sideL = darken(topColor, 0.63)
+    let sideR = darken(topColor, 0.68)
+    let sideB = darken(topColor, 0.55)
+    let sideL = darken(topColor, 0.63)
+
+    if (baseLevel === -1) {
+      const rand = tileRand(q * 11, r * 19)
+      const baseWall = PIT_WALLS[Math.floor(rand * PIT_WALLS.length)]
+      sideR = darken(baseWall, 0.95)
+      sideB = darken(baseWall, 0.85)
+      sideL = darken(baseWall, 0.90)
+    }
 
     let topStroke = 'none'
     let topStrokeW = 0
-    if (!suppressValidHighlight) {
+    if (!suppressValidHighlight && baseLevel !== -1) {
       if (isValid)                   { topStroke = '#7ec8e3'; topStrokeW = 1.2 }
       if (isMovePick)                { topStroke = '#6edba0'; topStrokeW = 1.5 }
       if (isPredPick)                { topStroke = '#c4a0e8'; topStrokeW = 1.5 }
     }
+    if (baseLevel === -1) { topStroke = '#3a3a5c'; topStrokeW = 0.8 }
     if (suppressValidHighlight && baseLevel > 0) { topStroke = '#f97316'; topStrokeW = 2.5 }
 
     return (
@@ -512,7 +526,7 @@ export function HexBoard({
         {!isOrthographic && shadowDecals(q, r, cx, cy, elev)}
 
         {/* Directional light overlay — same shape, gradient fill */}
-        {!isOrthographic && (
+        {!isOrthographic && baseLevel !== -1 && (
           <polygon
             points={topFacePts(cx, cy, elev, HEX_SIZE, isoY)}
             fill="url(#face-light)"
@@ -521,7 +535,7 @@ export function HexBoard({
         )}
 
         {/* Edge highlights: upper edges catch light (vertices 3→4→5→0) */}
-        {!isOrthographic && (() => {
+        {!isOrthographic && baseLevel !== -1 && (() => {
           const v = topFaceCoords(cx, cy, elev, HEX_SIZE, isoY)
           const hi = [3, 4, 5, 0].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
           const sh = [0, 1, 2, 3].map(i => `${v[i][0].toFixed(1)},${v[i][1].toFixed(1)}`).join(' ')
