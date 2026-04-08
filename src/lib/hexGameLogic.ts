@@ -2,7 +2,7 @@ import type {
   HexCoord, WallCoord, GameState, TurnPlan, ResolutionSummary,
   Role, TurnSchema, UIStep, MatchSettings, ChaserPlan, EvaderPlan,
 } from '../types'
-import { buildElevationsMap } from './topography'
+import { buildElevationsMap, getBaseElevation } from './topography'
 import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
@@ -58,14 +58,14 @@ export function buildWallSet(walls: WallCoord[]): Set<string> {
   return set
 }
 
-function isPassable(from: HexCoord, to: HexCoord, wallSet: Set<string>): boolean {
+export function isPassable(from: HexCoord, to: HexCoord, wallSet: Set<string>): boolean {
   return !wallSet.has(`${from.q},${from.r}>${to.q},${to.r}`)
 }
 
 function isConnectedThrough(
   from: HexCoord,
   to: HexCoord,
-  obstacleKeys: Set<string>,
+  elevations: Record<string, number>,
   wallSet: Set<string>,
 ): boolean {
   const toKey = `${to.q},${to.r}`
@@ -83,6 +83,7 @@ function isConnectedThrough(
       const nr = r + dr
       const nk = `${nq},${nr}`
       if (!isOnBoard(nq, nr)) continue
+      if (getBaseElevation(nq, nr, elevations) === -1) continue
       // Obstacles are fully traversable, only walls block connectivity.
       if (wallSet.has(`${key}>${nk}`)) continue
       if (!visited.has(nk)) queue.push(nk)
@@ -250,12 +251,14 @@ export function validNeighbors(
   pos: HexCoord,
   blocked: Set<string>,
   walls: Set<string> = new Set(),
+  elevations: Record<string, number> = {},
 ): HexCoord[] {
   return Object.values(HEX_DIRECTIONS)
     .map(({ dq, dr }) => ({ q: pos.q + dq, r: pos.r + dr }))
     .filter(({ q, r }) =>
       isOnBoard(q, r)
-      && isPassable(pos, { q, r }, walls),
+      && isPassable(pos, { q, r }, walls)
+      && getBaseElevation(q, r, elevations) !== -1,
     )
 }
 
@@ -296,6 +299,7 @@ export function reachableDestinations(
       const nk = `${nq},${nr}`
 
       if (!isOnBoard(nq, nr)) continue
+      if (getBaseElevation(nq, nr, elevations) === -1) continue
 
       const nextHex = { q: nq, r: nr }
       const edgeCost = calculateEdgeCost(hex, nextHex, elevations, walls)

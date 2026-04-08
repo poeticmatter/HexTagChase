@@ -11,6 +11,11 @@ export function tileRand(q: number, r: number): number {
 /**
  * Builds a Record mapping string "q,r" to integer elevation level.
  * Handles both the new map schema elevations and legacy obstacles fallback.
+ *
+ * Elevation Contract:
+ *  -1 — impassable (destroyed/collapsed hex; no movement in or out)
+ *   0 — flat ground (default for unlisted hexes)
+ * 1–4 — raised terrain (uphill movement costs 1 + deltaH per the existing calculateEdgeCost rule)
  */
 export function buildElevationsMap(mapDef: MapDefinition): Record<string, number> {
   const elevations: Record<string, number> = {}
