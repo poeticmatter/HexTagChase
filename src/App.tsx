@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useHexGame } from './hooks/useHexGame'
+import { useHexGameVsAI } from './hooks/useHexGameVsAI'
 import { HexBoard } from './components/HexBoard'
 import { PlanningPanel } from './components/PlanningPanel'
 import type { DraftPlan } from './components/PlanningPanel'
@@ -7,11 +8,11 @@ import type { TurnSchema, UIStep } from './types'
 import { Lobby } from './components/Lobby'
 import { MapEditor } from './components/MapEditor'
 import { SimulatorView } from './components/SimulatorView'
-import type { HexCoord, TurnPlan, MatchSettings } from './types'
+import type { HexCoord, TurnPlan, MatchSettings, GameState } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
 import type { LobbySettings } from './lib/matchConfig'
-import { obstacleSet, buildWallSet, reachableDestinations, validNeighbors, calculateEdgeCost } from './lib/hexGameLogic'
-import { useMemo } from 'react'
+import { buildWallSet, reachableDestinations } from './lib/hexGameLogic'
+import type { SimulationAgent } from './lib/simulationAgent'
 
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -73,8 +74,6 @@ const EMPTY_DRAFT: DraftPlan = {
   predictDest: null,
 }
 
-function hexKey(h: HexCoord): string { return `${h.q},${h.r}` }
-
 function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' {
   for (const step of schema.requiredSteps) {
     if (step === 'select_movement' && !draft.moveDest) return step
@@ -83,7 +82,12 @@ function getCurrentStep(draft: DraftPlan, schema: TurnSchema): UIStep | 'ready' 
   return 'ready'
 }
 
-function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema, cachedMovePaths: Map<string, HexCoord[]>): DraftPlan {
+function applyClick(
+  draft: DraftPlan,
+  hex: HexCoord,
+  schema: TurnSchema,
+  cachedMovePaths: Map<string, HexCoord[]>,
+): DraftPlan {
   const step = getCurrentStep(draft, schema)
   switch (step) {
     case 'select_movement': {
@@ -95,20 +99,29 @@ function applyClick(draft: DraftPlan, hex: HexCoord, schema: TurnSchema, cachedM
   }
 }
 
-// ── Game view ─────────────────────────────────────────────────────────────────
+// ── Active game board ─────────────────────────────────────────────────────────
+//
+// Shared rendering for both PvP and vs-AI modes. Accepts the resolved game
+// state and action callbacks so it has no knowledge of the transport layer.
 
-function GameView({
-  roomCode,
-  playerRole,
-  settings,
-}: {
-  roomCode: string
+interface ActiveGameProps {
+  gameState: GameState
   playerRole: 1 | 2
-  settings: MatchSettings | null
-}) {
-  const { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound } =
-    useHexGame(roomCode, playerRole, settings)
+  waitingForPartner: boolean
+  /** Whether the "Start Next Round" button is available to this player. */
+  canStartNextRound: boolean
+  submitPlan: (plan: TurnPlan) => void
+  startNextRound: () => void
+}
 
+function ActiveGame({
+  gameState,
+  playerRole,
+  waitingForPartner,
+  canStartNextRound,
+  submitPlan,
+  startNextRound,
+}: ActiveGameProps) {
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
 
@@ -120,82 +133,58 @@ function GameView({
     setDraft(EMPTY_DRAFT)
   }, [])
 
-  // Reset draft on turn advance
+  // Reset draft whenever the turn advances.
   useEffect(() => {
     setDraft(EMPTY_DRAFT)
-  }, [gameState?.turn])
+  }, [gameState.turn])
 
-  // Derived values — computed before early returns so hook order stays stable.
-  const isChaser         = gameState?.settings.chaserPlayer === playerRole
+  const isChaser         = gameState.settings.chaserPlayer === playerRole
   const roleKey          = isChaser ? 'chaser' : 'evader'
-  const schema: TurnSchema = gameState?.turnSchema[roleKey] ?? { requiredSteps: [] }
+  const schema: TurnSchema = gameState.turnSchema[roleKey]
   const currentStep      = getCurrentStep(draft, schema)
-  // Players with no steps this phase are handled natively by the engine.
   const effectiveWaiting = waitingForPartner || schema.requiredSteps.length === 0
 
-  // Topology — recomputed only when map structure changes, never on draft updates.
-  const topology = useMemo(() => {
-    if (!gameState) return null
-    return {
-      wallKeys: buildWallSet(gameState.walls),
-    }
-  }, [gameState])
+  const topology = useMemo(() => ({
+    wallKeys: buildWallSet(gameState.walls),
+  }), [gameState.walls, gameState.obstacles])
 
-  // Heavy pathfinding — isolated from draft; runs exactly once per turn phase.
-  // Now returns a Map to give O(1) access to the shortest paths.
   const cachedMovePaths = useMemo<Map<string, HexCoord[]>>(() => {
-    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
-    const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
-    const myBudget = isChaser ? gameState.p1Budget : gameState.p2Budget
+    if (effectiveWaiting || gameState.winner) return new Map()
+    const myPos    = isChaser ? gameState.chaserPos : gameState.evaderPos
+    const myBudget = playerRole === 1 ? gameState.p1Budget : gameState.p2Budget
     return reachableDestinations(myPos, gameState.elevations, topology.wallKeys, myBudget)
-  }, [gameState, topology, effectiveWaiting, isChaser])
+  }, [gameState, topology, effectiveWaiting, isChaser, playerRole])
 
   const cachedPredictPaths = useMemo<Map<string, HexCoord[]>>(() => {
-    if (!gameState || !topology || effectiveWaiting || gameState.winner) return new Map()
-    const opponentPos = isChaser ? gameState.evaderPos : gameState.chaserPos
-    const oppBudget = isChaser ? gameState.p2Budget : gameState.p1Budget
-    return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, oppBudget)
+    if (effectiveWaiting || gameState.winner) return new Map()
+    const opponentPos    = isChaser ? gameState.evaderPos  : gameState.chaserPos
+    const opponentBudget = playerRole === 1 ? gameState.p2Budget : gameState.p1Budget
+    return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, opponentBudget)
   }, [gameState, topology, effectiveWaiting, isChaser])
 
-  // Target sets for the UI
-  const cachedMoveTargets = useMemo(() => new Set(cachedMovePaths.keys()), [cachedMovePaths])
+  const cachedMoveTargets    = useMemo(() => new Set(cachedMovePaths.keys()),    [cachedMovePaths])
   const cachedPredictTargets = useMemo(() => new Set(cachedPredictPaths.keys()), [cachedPredictPaths])
 
   const handleHexClick = useCallback((hex: HexCoord) => {
     setDraft(prev => {
-      if (!gameState) return prev
       const isChaserLocal = gameState.settings.chaserPlayer === playerRole
-      const roleKey = isChaserLocal ? 'chaser' : 'evader'
-      const schema = gameState.turnSchema[roleKey]
-      return applyClick(prev, hex, schema, cachedMovePaths)
+      const schemaLocal   = gameState.turnSchema[isChaserLocal ? 'chaser' : 'evader']
+      return applyClick(prev, hex, schemaLocal, cachedMovePaths)
     })
   }, [gameState, playerRole, cachedMovePaths])
 
-  // O(1) router — returns pre-computed sets for move/predict; bonus stays draft-reactive
-  // because its origin is the uncommitted moveDest, not the authoritative game position.
   const validTargets = useMemo<Set<string>>(() => {
-    if (!gameState || effectiveWaiting || gameState.winner || !topology) return new Set()
+    if (effectiveWaiting || gameState.winner) return new Set()
     switch (currentStep) {
       case 'select_movement':   return cachedMoveTargets
       case 'select_prediction': return cachedPredictTargets
-      case 'ready': return new Set()
+      case 'ready':             return new Set()
     }
-  }, [gameState, effectiveWaiting, currentStep, cachedMoveTargets, cachedPredictTargets, topology])
+  }, [effectiveWaiting, currentStep, cachedMoveTargets, cachedPredictTargets, gameState.winner])
 
-  if (status === 'connecting')          return <StatusScreen message="Connecting…" />
-  if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
-  if (status === 'disconnected')        return <StatusScreen message="Your opponent disconnected." />
-  if (status === 'reconnecting')        return <ReconnectingScreen />
-  if (status === 'waiting_for_partner') {
-    const opponentRole = isChaser ? 'Evader' : 'Chaser'
-    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
-  }
-  if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
-  if (!gameState)                       return <StatusScreen message="Loading…" />
-
-  const maxTurns     = gameState.settings.maxTurns
-  const myPos        = isChaser ? gameState.chaserPos    : gameState.evaderPos
-  const opponentPos  = isChaser ? gameState.evaderPos    : gameState.chaserPos
+  const maxTurns         = gameState.settings.maxTurns
+  const myPos            = isChaser ? gameState.chaserPos    : gameState.evaderPos
+  const opponentPos      = isChaser ? gameState.evaderPos    : gameState.chaserPos
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
 
@@ -262,7 +251,7 @@ function GameView({
           <p className="text-lg font-semibold">
             {(gameState.winner === 'chaser') === isChaser ? '🎉 You win the round!' : 'Opponent wins the round.'}
           </p>
-          {playerRole === 1 ? (
+          {canStartNextRound ? (
             <button
               onClick={startNextRound}
               className="px-6 py-2 bg-green-800 hover:bg-green-700 rounded-lg text-sm text-neutral-300 transition-colors"
@@ -270,7 +259,7 @@ function GameView({
               Start Next Round
             </button>
           ) : (
-            <p className="text-sm text-neutral-400 animate-pulse">Waiting for Host to start next round...</p>
+            <p className="text-sm text-neutral-400 animate-pulse">Waiting for Host to start next round…</p>
           )}
         </div>
       ) : (
@@ -293,18 +282,81 @@ function GameView({
   )
 }
 
+// ── PvP game view ─────────────────────────────────────────────────────────────
+
+function GameView({
+  roomCode,
+  playerRole,
+  settings,
+}: {
+  roomCode: string
+  playerRole: 1 | 2
+  settings: MatchSettings | null
+}) {
+  const { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound } =
+    useHexGame(roomCode, playerRole, settings)
+
+  if (status === 'connecting')          return <StatusScreen message="Connecting…" />
+  if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
+  if (status === 'disconnected')        return <StatusScreen message="Your opponent disconnected." />
+  if (status === 'reconnecting')        return <ReconnectingScreen />
+  if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
+  if (status === 'waiting_for_partner') {
+    const isChaser = gameState?.settings.chaserPlayer === playerRole
+    const opponentRole = isChaser ? 'Evader' : 'Chaser'
+    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
+  }
+  if (!gameState) return <StatusScreen message="Loading…" />
+
+  return (
+    <ActiveGame
+      gameState={gameState}
+      playerRole={playerRole}
+      waitingForPartner={waitingForPartner}
+      canStartNextRound={playerRole === 1}
+      submitPlan={submitPlan}
+      startNextRound={startNextRound}
+    />
+  )
+}
+
+// ── AI game view ──────────────────────────────────────────────────────────────
+
+function AIGameView({
+  settings,
+  aiStrategy,
+}: {
+  settings: MatchSettings
+  aiStrategy: SimulationAgent
+}) {
+  const { gameState, submitPlan, startNextRound } = useHexGameVsAI(settings, aiStrategy)
+
+  return (
+    <ActiveGame
+      gameState={gameState}
+      playerRole={1}
+      waitingForPartner={false}
+      canStartNextRound={true}
+      submitPlan={submitPlan}
+      startNextRound={startNextRound}
+    />
+  )
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-type RoomInfo = { code: string; role: 1 | 2; settings: MatchSettings | null }
+type GameConfig =
+  | { mode: 'pvp'; code: string; role: 1 | 2; settings: MatchSettings | null }
+  | { mode: 'ai';  settings: MatchSettings; aiStrategy: SimulationAgent }
 
 export default function App() {
   const params = new URLSearchParams(window.location.search)
-  const isEditor = params.get('editor') === 'true'
+  const isEditor    = params.get('editor')    === 'true'
   const isSimulator = params.get('simulator') === 'true'
 
-  const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(() => {
-    const code = new URLSearchParams(window.location.search).get('room')
-    return code ? { code: code.toUpperCase(), role: 2, settings: null } : null
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(() => {
+    const code = params.get('room')
+    return code ? { mode: 'pvp', code: code.toUpperCase(), role: 2, settings: null } : null
   })
 
   const handleCreateGame = useCallback((lobby: LobbySettings) => {
@@ -312,11 +364,35 @@ export default function App() {
     const url = new URL(window.location.href)
     url.searchParams.set('room', code)
     history.replaceState(null, '', url.toString())
-    setRoomInfo({ code, role: 1, settings: resolveMatchSettings(lobby) })
+    setGameConfig({ mode: 'pvp', code, role: 1, settings: resolveMatchSettings(lobby) })
   }, [])
 
-  if (isEditor) return <MapEditor />
+  const handlePlayVsAI = useCallback((lobby: LobbySettings, aiStrategy: SimulationAgent) => {
+    setGameConfig({ mode: 'ai', settings: resolveMatchSettings(lobby), aiStrategy })
+  }, [])
+
+  if (isEditor)    return <MapEditor />
   if (isSimulator) return <SimulatorView />
-  if (!roomInfo) return <Lobby onCreateGame={handleCreateGame} onOpenSimulator={() => { window.location.href = '?simulator=true' }} />
-  return <GameView roomCode={roomInfo.code} playerRole={roomInfo.role} settings={roomInfo.settings} />
+
+  if (!gameConfig) {
+    return (
+      <Lobby
+        onCreateGame={handleCreateGame}
+        onPlayVsAI={handlePlayVsAI}
+        onOpenSimulator={() => { window.location.href = '?simulator=true' }}
+      />
+    )
+  }
+
+  if (gameConfig.mode === 'ai') {
+    return <AIGameView settings={gameConfig.settings} aiStrategy={gameConfig.aiStrategy} />
+  }
+
+  return (
+    <GameView
+      roomCode={gameConfig.code}
+      playerRole={gameConfig.role}
+      settings={gameConfig.settings}
+    />
+  )
 }
