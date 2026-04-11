@@ -20,8 +20,10 @@ export function produceTurnPlan(
   const isChaser = role === 'chaser'
   const myPos = isChaser ? gameState.chaserPos : gameState.evaderPos
   const oppPos = isChaser ? gameState.evaderPos : gameState.chaserPos
-  const myBudget = isChaser ? gameState.p1Budget : gameState.p2Budget
-  const oppBudget = isChaser ? gameState.p2Budget : gameState.p1Budget
+  const chaserBudget = gameState.settings.chaserPlayer === 1 ? gameState.p1Budget : gameState.p2Budget
+  const evaderBudget = gameState.settings.chaserPlayer === 1 ? gameState.p2Budget : gameState.p1Budget
+  const myBudget = isChaser ? chaserBudget : evaderBudget
+  const oppBudget = isChaser ? evaderBudget : chaserBudget
   const walls = buildWallSet(gameState.walls)
 
   const myReachable = reachableDestinations(myPos, gameState.elevations, walls, myBudget)
