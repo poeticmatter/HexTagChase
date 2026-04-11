@@ -2,64 +2,71 @@
 
 ## Overview
 
-Hex Tag is a two-player asymmetric pursuit game played on a hexagonal grid. One player is the **chaser** and the other is the **evader**. Both players secretly plan their moves simultaneously each turn, then all actions resolve at once. The chaser wins by closing in; the evader wins by staying alive long enough.
+Hex Tag is a two-player asymmetric pursuit game played on a hexagonal grid. One player is the **chaser** and the other is the **evader**. Both players secretly plan their moves and predictions simultaneously each turn, then all actions resolve at once. The chaser wins by closing in; the evader wins by staying alive long enough.
+
+Games are played as a **best-of-N match** with roles swapping each round. The first player to win two consecutive rounds wins the match.
 
 ---
 
 ## The Board
 
-The board is a hex-shaped grid with a radius of 4 hexes from the center, giving 61 playable hexes total. Coordinates use the axial system (q, r).
+The board is a hex-shaped grid with a radius of 4 hexes from the center, giving 61 playable hexes total. Coordinates use the axial system (q, r). Maps are authored as static JSON files loaded from `src/maps/`.
 
-**Obstacles** are impassable hexes that block movement. They are placed away from starting positions and never form clusters of three or more adjacent hexes. The default count is 12.
+### Terrain
 
-**Walls** are soft barriers placed on edges between adjacent hexes. Unlike obstacles, walls do not block a hex — they slow movement across the shared border. They are organized into connected sections of 4–6 edge segments. The default count is 0 wall sections.
+**Elevation levels** shape movement cost:
+- Level `0` — flat ground (default)
+- Level `1–4` — raised terrain; moving uphill costs `1 + deltaH` per step
+- Level `-1` — impassable (pit, collapsed hex); no movement in or out
+
+**Obstacles** in legacy map format correspond to elevation `1`. The `elevations` map in a `MapDefinition` is the authoritative terrain source.
+
+**Walls** are soft barriers on edges between adjacent hexes. They add `+1` to the edge cost. Walls do not block a hex — they slow crossing. Unlike obstacles, a wall-blocked edge is always crossable if budget allows.
 
 ---
 
 ## Players and Roles
 
 ### Chaser
-- Wins by ending a turn adjacent (distance ≤ 1) to the evader.
-- Submits a movement destination, a prediction of the evader's destination, and optionally a bonus move.
+- Wins by ending a turn adjacent (distance ≤ 1) to the evader, **with elevation parity** (see Win Conditions).
+- Submits a movement destination and a prediction of the evader's destination.
 
 ### Evader
-- Wins by surviving until the turn limit is reached without the chaser ever closing to distance ≤ 1.
-- Submits only a movement destination (and optionally a bonus move).
+- Wins by surviving until the turn limit is reached without being tagged.
+- Submits a movement destination and a prediction of the chaser's destination.
 
-Starting positions are fixed: chaser at (−3, 0), evader at (3, 0).
+Starting positions are defined per map (default: chaser at `(−3, 0)`, evader at `(3, 0)`).
 
 ---
 
 ## Movement
 
-Each turn, every player has a **movement budget of 2**.
+Each turn, each player has a **movement budget** (default 2; can be configured to 1).
 
-- Moving across a standard edge costs **1**.
-- Moving across a walled edge costs **2**.
+Edge costs:
+| Edge type | Cost |
+|-----------|------|
+| Flat edge (same elevation) | 1 |
+| Uphill edge (delta `d`) | `1 + d` |
+| Walled edge (flat) | 2 |
+| Walled + uphill edge | `2 + d` |
+| Impassable hex (elevation `-1`) | blocked |
 
-Within a single turn a player may:
-- Move 1 standard step (cost 1), then 1 more standard step (cost 1) — total 2.
-- Move 1 standard step (cost 1) to land on a hex adjacent to a wall, then cross that wall next turn.
-- Cross a wall in a single step (cost 2, full budget spent) — valid only when starting adjacent to the wall.
+A player may spend their budget across multiple steps in any combination that does not exceed the total. Movement is computed by Dijkstra over the hex graph — all reachable destinations within budget are valid.
 
-**A player cannot cross a wall as a second step.** Moving one standard hex then attempting to cross a wall would total cost 3, which exceeds the budget and is not offered as a valid destination.
-
-Movement into an obstacle hex is never permitted.
+**Mid-step collision**: If both players occupy the same hex at any point during path execution, movement stops there and the chaser's tag condition is evaluated.
 
 ---
 
 ## Turn Structure
 
-Each turn proceeds through up to two phases.
+Each turn is a single phase.
 
-### Planning Phase
+### Planning
 
 Both players simultaneously and secretly choose:
-
-| Player | Choices |
-|--------|---------|
-| Chaser | Movement destination + prediction of evader's destination + (optionally) a bonus move |
-| Evader | Movement destination + (optionally) a bonus move |
+- A movement destination (and the path to reach it)
+- A prediction of the opponent's destination
 
 Neither player sees the other's choices until resolution.
 
@@ -67,36 +74,31 @@ Neither player sees the other's choices until resolution.
 
 Once both plans are submitted:
 
-1. Movement executes for both players simultaneously.
-2. The chaser's prediction is checked: did the evader actually move to the predicted destination?
-3. **Prediction hit** → the chaser earns a bonus step.  
-   **Prediction miss** → the evader earns a bonus step.
-4. The bonus step is applied.
-5. Win conditions are checked.
+1. Both movement paths execute simultaneously.
+2. Mid-step collisions are checked at each step.
+3. Win conditions are evaluated at final positions.
+4. Both players' predictions are checked against actual final positions.
+5. Each player whose prediction was correct gains **+1 budget** for the next turn.
 
-**Mid-step collision**: If both players would occupy the same hex at any point during movement, they are treated as meeting at that hex and movement stops.
+If a player stays in place (chooses their current hex), their path is empty and their position is unchanged.
 
 ---
 
-## Bonus Moves
+## Predictions and Budget
 
-The entitled player (chaser on a prediction hit, evader on a miss) may take one additional step of exactly 1 hex. The bonus step is subject to the same wall and obstacle rules as normal movement. The entitled player may decline the bonus by not selecting a destination.
+Both players predict where the opponent will land. A correct prediction earns **+1 movement budget** on the following turn. A wrong prediction earns nothing — there is no penalty.
 
-### Bonus Timing Modes
+This means a player can have up to `baseMovement + 1` budget in any given turn. Budget resets to `baseMovement` each turn, then the prediction bonus is applied on top.
 
-**Pre-commit**: Both players submit their bonus move as part of their planning plan before any moves are revealed. The entitled player's bonus executes if valid; the other player's bonus is discarded.
-
-**Post-reveal**: Movement resolves and is revealed to both players first. Then only the entitled player selects their bonus move in a live follow-up phase.
+There is no separate bonus phase. Prediction rewards feed directly into next-turn budget.
 
 ---
 
 ## Walls (Soft Barriers)
 
-A wall sits on the edge between two adjacent hexes. A player standing adjacent to a wall-blocked edge may cross it by spending their full movement budget (cost 2) on that single step. After crossing, the player has no remaining budget for that turn.
+A wall sits on the edge between two adjacent hexes. Crossing a walled edge costs 1 more than a normal edge. A player on one side of a wall can cross it in a single step as long as the total path cost stays within budget.
 
-Walls do **not** permanently trap players — any hex is always reachable given enough turns. Wall sections are generated such that both players remain connected to each other through the wall layout at the start of the game.
-
-Bonus moves treat walls as hard barriers (the bonus budget is 1, and walls cost 2).
+Walls do not permanently trap players — any hex is reachable given enough budget or turns.
 
 ---
 
@@ -104,27 +106,66 @@ Bonus moves treat walls as hard barriers (the bonus budget is 1, and walls cost 
 
 | Condition | Winner |
 |-----------|--------|
-| Chaser is distance ≤ 1 from the evader at the end of any resolution step | Chaser |
-| The turn counter reaches the configured turn limit without the chaser winning | Evader |
+| Chaser ends up at distance 0 from the evader | Chaser |
+| Chaser ends up at distance 1 from the evader **and** `chaserElevation ≥ evaderElevation` | Chaser |
+| Turn counter reaches `maxTurns` without the chaser winning | Evader |
 
-Distance is the standard axial (cube-coordinate) hex distance.
+Distance is the standard axial (cube-coordinate) hex distance. The elevation check at distance 1 means an evader on raised ground cannot be tagged by a chaser standing below.
+
+---
+
+## Multi-Round Match
+
+A match consists of multiple rounds. After each round, the roles swap (the chaser becomes the evader and vice versa). The match ends when one player wins **two consecutive rounds**. That player is the match winner.
+
+`MatchState` tracks:
+- `roundNumber` — current round (1-indexed)
+- `history` — array of per-round winner player IDs
+- `matchWinner` — set when the same player wins two rounds in a row
+
+Between rounds, positions and map state reset to the map's starting configuration. The base movement budget resets to `baseMovement`.
 
 ---
 
 ## Match Settings
 
-Configured by the host before the game begins, before any opponent connects.
+Configured by the host before the game begins.
 
-| Setting | Description | Default | Range |
-|---------|-------------|---------|-------|
-| Turn Limit | Number of turns the evader must survive | 15 | 10–20 |
-| Host Role | Which role the host plays | Chaser | Chaser / Evader |
-| Bonus Timing | When the bonus move is selected | Pre-commit | Pre-commit / Post-reveal |
-| Obstacles | Number of obstacle hexes | 12 | 0–20 |
-| Wall Sections | Number of connected wall sections | 0 | 0–4 |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Turn Limit | Turns per round the evader must survive | 15 |
+| Host Role | Which role the host plays in round 1 | Chaser |
+| Base Movement | Movement budget per turn | 2 |
+| Map | Which map to play on | (first in registry) |
+
+---
+
+## Map Editor
+
+The in-browser map editor (`MapEditor`) lets players author custom maps. Supported editing modes:
+- **Elevation** — click hexes to cycle through elevation levels (0, 1, 2, 3, -1)
+- **Wall** — click edges to toggle wall segments
+- **Chaser / Evader** — click to set spawn positions
+
+The editor registers the in-progress map into the `mapRegistry` for live preview. Finished maps can be exported as JSON and dropped into `src/maps/` to be bundled.
+
+---
+
+## Simulation
+
+`SimulatorView` runs automated Monte Carlo simulations against any bundled map using configurable AI agents. Simulations run in a Web Worker to keep the UI responsive.
+
+Agent strategies:
+- `random` — picks uniformly from all reachable destinations
+- `greedy` — minimizes (chaser) or maximizes (evader) distance to opponent
+- `lookahead` — models the opponent's greedy response one step ahead
+
+Results show win rates, average game length, prediction accuracy, and per-hex heatmaps.
 
 ---
 
 ## Networking
 
-The game is peer-to-peer with no server. The host generates the board and shares a room code. The client joins by visiting a URL containing that code. All game logic runs on the host; the client receives authoritative state after each resolution. Plans are submitted over an encrypted PeerJS data channel.
+The game is peer-to-peer with no server. The host generates a room code; the client joins via URL. All game logic runs on the host; the client receives authoritative state after each resolution. Plans are submitted over an encrypted PeerJS data channel.
+
+The host uses a **commit-and-hold** pattern: it stores its own plan locally, waits for the client's plan, then resolves and broadcasts the new state. This prevents the host from gaining information advantage by observing the network before committing.
