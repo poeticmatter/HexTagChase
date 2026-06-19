@@ -8,6 +8,15 @@ export interface WallCoord {
   q2: number; r2: number
 }
 
+// ── Map rules ─────────────────────────────────────────────────────────────────
+
+/** When a player leaves a hex, it collapses into a pit (elevation -1). */
+export interface CrumblingHexRule {
+  type: 'crumbling_hex'
+}
+
+export type MapRule = CrumblingHexRule
+
 export type Role = 'chaser' | 'evader'
 
 export interface MapDefinition {
@@ -18,6 +27,7 @@ export interface MapDefinition {
   obstacles: HexCoord[]
   elevations?: Record<string, number>
   walls: WallCoord[]
+  rules?: MapRule[]
 }
 
 export interface MatchSettings {
@@ -88,6 +98,7 @@ export interface GameState {
   obstacles: HexCoord[]
   elevations: Record<string, number>
   walls: WallCoord[]
+  rules: MapRule[]
   p1Budget: number
   p2Budget: number
   transientContext: TransientContext

@@ -1,0 +1,11 @@
+{
+  "id": "crumbling-arena",
+  "name": "Crumbling Arena",
+  "chaserStart": { "q": -3, "r": 0 },
+  "evaderStart": { "q": 3, "r": 0 },
+  "obstacles": [],
+  "walls": [],
+  "rules": [
+    { "type": "crumbling_hex" }
+  ]
+}

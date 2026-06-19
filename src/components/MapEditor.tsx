@@ -1,8 +1,16 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { HexBoard } from './HexBoard'
-import type { HexCoord, WallCoord, MapDefinition } from '../types'
+import type { HexCoord, WallCoord, MapDefinition, MapRule } from '../types'
 import { HEX_RADIUS } from '../lib/hexGrid'
 import { buildWallSet } from '../lib/hexGameLogic'
+
+const AVAILABLE_RULES: { type: MapRule['type']; label: string; description: string }[] = [
+  {
+    type: 'crumbling_hex',
+    label: 'Crumbling Hexes',
+    description: 'Hexes collapse into pits when a player steps off them.',
+  },
+]
 
 type EditorMode = 'elevation' | 'wall' | 'chaser' | 'evader'
 
@@ -48,6 +56,7 @@ export function MapEditor() {
   const [elevations, setElevations] = useState<Record<string, number>>({})
   const [selectedElevation, setSelectedElevation] = useState<number>(1)
   const [walls, setWalls] = useState<Set<string>>(new Set())
+  const [activeRuleTypes, setActiveRuleTypes] = useState<Set<MapRule['type']>>(new Set())
 
   const validTargets = useMemo(() => {
     // In editor, all valid board hexes are clickable
@@ -121,6 +130,8 @@ export function MapEditor() {
       return { q1: parts[0], r1: parts[1], q2: parts[2], r2: parts[3] }
     })
 
+    const rules: MapRule[] = Array.from(activeRuleTypes).map(type => ({ type } as MapRule))
+
     const def: MapDefinition = {
       id: mapName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       name: mapName,
@@ -128,7 +139,8 @@ export function MapEditor() {
       evaderStart,
       obstacles: [],
       elevations,
-      walls: wallArr
+      walls: wallArr,
+      ...(rules.length > 0 ? { rules } : {}),
     }
 
     const json = JSON.stringify(def, null, 2)
@@ -217,6 +229,38 @@ export function MapEditor() {
               Note: Wall placing requires HexBoard update to handle click edges.
             </p>
           )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-semibold text-neutral-400 uppercase">Map Rules</label>
+          <div className="flex flex-col gap-2 p-2 bg-neutral-900 rounded border border-neutral-700">
+            {AVAILABLE_RULES.map(rule => {
+              const isActive = activeRuleTypes.has(rule.type)
+              return (
+                <label key={rule.type} className="flex items-start gap-2 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    onChange={() => {
+                      setActiveRuleTypes(prev => {
+                        const next = new Set(prev)
+                        if (next.has(rule.type)) next.delete(rule.type)
+                        else next.add(rule.type)
+                        return next
+                      })
+                    }}
+                    className="mt-0.5 accent-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-neutral-200 group-hover:text-white">
+                      {rule.label}
+                    </span>
+                    <p className="text-xs text-neutral-500 leading-tight">{rule.description}</p>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
         </div>
 
         <div className="flex flex-col gap-2 mt-4">

@@ -1,5 +1,16 @@
-import type { MapDefinition, HexCoord, WallCoord } from '../types'
+import type { MapDefinition, HexCoord, WallCoord, MapRule } from '../types'
 import { isOnBoard, hexDistance } from './hexGrid'
+
+const VALID_RULE_TYPES: ReadonlySet<string> = new Set(['crumbling_hex'])
+
+function isMapRule(value: unknown): value is MapRule {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).type === 'string' &&
+    VALID_RULE_TYPES.has((value as Record<string, unknown>).type as string)
+  )
+}
 
 export function isHexCoord(value: unknown): value is HexCoord {
   return (
@@ -81,6 +92,21 @@ export function validateMapDefinition(raw: unknown, filePath: string): MapDefini
     }
   }
 
+  if (m.rules !== undefined) {
+    if (!Array.isArray(m.rules)) {
+      console.warn(`[MapRegistry] ${filePath}: 'rules' must be an array — skipping.`)
+      return null
+    }
+    for (const rule of m.rules) {
+      if (!isMapRule(rule)) {
+        console.warn(
+          `[MapRegistry] ${filePath}: unknown rule ${JSON.stringify(rule)} — skipping map.`
+        )
+        return null
+      }
+    }
+  }
+
   if (!Array.isArray(m.walls)) {
     console.warn(`[MapRegistry] ${filePath}: 'walls' must be an array — skipping.`)
     return null
@@ -116,5 +142,6 @@ export function validateMapDefinition(raw: unknown, filePath: string): MapDefini
     obstacles: m.obstacles as HexCoord[],
     elevations: m.elevations as Record<string, number> | undefined,
     walls: m.walls as WallCoord[],
+    rules: m.rules as MapRule[] | undefined,
   }
 }

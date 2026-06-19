@@ -3,6 +3,7 @@ import type {
   Role, TurnSchema, UIStep, MatchSettings, ChaserPlan, EvaderPlan,
 } from '../types'
 import { buildElevationsMap, getBaseElevation } from './topography'
+import { applyMapRules } from './mapRules'
 import {
   HEX_RADIUS, hexDistance, isOnBoard, HEX_DIRECTIONS, getAllHexes,
 } from './hexGrid'
@@ -30,6 +31,7 @@ export function buildInitialState(settings: MatchSettings): GameState {
     obstacles: mapDef.obstacles,
     elevations,
     walls: mapDef.walls,
+    rules: mapDef.rules ?? [],
     p1Budget: settings.baseMovement ?? 2,
     p2Budget: settings.baseMovement ?? 2,
     transientContext: {},
@@ -361,6 +363,7 @@ export function buildNextRoundState(prevState: GameState): GameState {
     winner: null,
     obstacles: mapDef.obstacles,
     elevations,
+    rules: mapDef.rules ?? [],
     p1Budget: newSettings.baseMovement ?? 2,
     p2Budget: newSettings.baseMovement ?? 2,
     p1TurnData: {},
@@ -437,6 +440,18 @@ function _resolveRound(state: GameState): GameState {
   const evaderSurvived = !chaserCatches && state.turn >= state.settings.maxTurns
   const winner: Role | null = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
+  // Apply map rules to mutate terrain for the next turn
+  const elevationsAfterRules = applyMapRules(
+    state.rules,
+    state.elevations,
+    state.chaserPos,
+    state.evaderPos,
+    finalChaserPath,
+    finalEvaderPath,
+    finalChaserPos,
+    finalEvaderPos,
+  )
+
   let matchState = state.matchState
   if (winner) {
     const winnerPlayer = winner === 'chaser' ? state.settings.chaserPlayer : (state.settings.chaserPlayer === 1 ? 2 : 1)
@@ -481,6 +496,7 @@ function _resolveRound(state: GameState): GameState {
     prevEvaderPath: finalEvaderPath.length > 0 ? [state.evaderPos, ...finalEvaderPath] : null,
     turn: state.turn + 1,
     winner,
+    elevations: elevationsAfterRules,
     p1Budget: nextP1Budget,
     p2Budget: nextP2Budget,
     p1TurnData: {},
