@@ -1,5 +1,8 @@
 import type { MatchSettings } from '../types'
 
+/** Network transport for a player-vs-player game. */
+export type Transport = 'live' | 'async'
+
 /**
  * Raw user preferences captured by the Lobby form.
  */
@@ -8,6 +11,7 @@ export interface LobbySettings {
   hostRole: 'Chaser' | 'Evader'
   baseMovement: 1 | 2
   mapId: string
+  transport: Transport
 }
 
 /**

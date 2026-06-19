@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { LobbySettings } from '../lib/matchConfig'
+import type { LobbySettings, Transport } from '../lib/matchConfig'
 import { mapRegistry } from '../lib/mapRegistry'
 import { MapThumbnail } from './MapThumbnail'
 import type { SimulationAgent } from '../lib/simulationAgent'
@@ -11,6 +11,7 @@ interface LobbyFormState {
   mapId: string
   opponentType: 'human' | 'ai'
   aiStrategy: SimulationAgent
+  transport: Transport
 }
 
 const DEFAULT_FORM: LobbyFormState = {
@@ -20,6 +21,12 @@ const DEFAULT_FORM: LobbyFormState = {
   mapId: mapRegistry.getAllMaps()[0].id,
   opponentType: 'human',
   aiStrategy: 'greedy',
+  transport: 'async',
+}
+
+const TRANSPORT_LABELS: Record<Transport, string> = {
+  async: 'Async (Supabase)',
+  live: 'Live (P2P)',
 }
 
 const AI_STRATEGY_LABELS: Record<SimulationAgent, string> = {
@@ -42,6 +49,7 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
     hostRole: form.hostRole,
     baseMovement: form.baseMovement,
     mapId: form.mapId,
+    transport: form.transport,
   }
 
   return (
@@ -163,6 +171,35 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
             </div>
           )}
         </div>
+
+        {/* Transport (human opponent only) */}
+        {form.opponentType === 'human' && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+              Play Mode
+            </label>
+            <div className="flex rounded-lg overflow-hidden border border-neutral-700">
+              {(['async', 'live'] as Transport[]).map(option => (
+                <button
+                  key={option}
+                  onClick={() => setForm(f => ({ ...f, transport: option }))}
+                  className={`flex-1 py-2 text-sm font-semibold transition-colors ${
+                    form.transport === option
+                      ? 'bg-neutral-600 text-white'
+                      : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  {TRANSPORT_LABELS[option]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              {form.transport === 'async'
+                ? 'Take turns at any time — state is saved online. Best for different time zones.'
+                : 'Both players connect at the same time over a direct peer-to-peer link.'}
+            </p>
+          </div>
+        )}
 
         {/* Map Selection */}
         <div className="flex flex-col gap-1.5">

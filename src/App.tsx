@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useHexGame } from './hooks/useHexGame'
+import { useHexGameAsync } from './hooks/useHexGameAsync'
 import { useHexGameVsAI } from './hooks/useHexGameVsAI'
 import { HexBoard } from './components/HexBoard'
 import { PlanningPanel } from './components/PlanningPanel'
@@ -10,7 +11,7 @@ import { MapEditor } from './components/MapEditor'
 import { SimulatorView } from './components/SimulatorView'
 import type { HexCoord, TurnPlan, MatchSettings, GameState } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
-import type { LobbySettings } from './lib/matchConfig'
+import type { LobbySettings, Transport } from './lib/matchConfig'
 import { buildWallSet, reachableDestinations } from './lib/hexGameLogic'
 import type { SimulationAgent } from './lib/simulationAgent'
 
@@ -44,8 +45,17 @@ function ReconnectingScreen() {
   )
 }
 
-function WaitingForPartner({ roomCode, opponentRole }: { roomCode: string; opponentRole: string }) {
-  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+function WaitingForPartner({
+  roomCode,
+  opponentRole,
+  transport,
+}: {
+  roomCode: string
+  opponentRole: string
+  transport: Transport
+}) {
+  const base = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+  const shareUrl = transport === 'async' ? `${base}&mode=async` : base
   return (
     <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-6">
       <h2 className="text-2xl font-semibold">Waiting for {opponentRole}…</h2>
@@ -304,7 +314,7 @@ function GameView({
   if (status === 'waiting_for_partner') {
     const isChaser = gameState?.settings.chaserPlayer === playerRole
     const opponentRole = isChaser ? 'Evader' : 'Chaser'
-    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} />
+    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} transport="live" />
   }
   if (!gameState) return <StatusScreen message="Loading…" />
 
@@ -314,6 +324,44 @@ function GameView({
       playerRole={playerRole}
       waitingForPartner={waitingForPartner}
       canStartNextRound={playerRole === 1}
+      submitPlan={submitPlan}
+      startNextRound={startNextRound}
+    />
+  )
+}
+
+// ── Async PvP game view ───────────────────────────────────────────────────────
+//
+// Supabase-backed transport. Either player may start the next round, since the host
+// may be offline when a round ends.
+
+function AsyncGameView({
+  roomCode,
+  playerRole,
+  settings,
+}: {
+  roomCode: string
+  playerRole: 1 | 2
+  settings: MatchSettings | null
+}) {
+  const { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound } =
+    useHexGameAsync(roomCode, playerRole, settings)
+
+  if (status === 'connecting')        return <StatusScreen message="Connecting…" />
+  if (status === 'error')             return <StatusScreen message={errorMsg ?? 'Connection error.'} />
+  if (status === 'waiting_for_partner') {
+    const isChaser = gameState?.settings.chaserPlayer === playerRole
+    const opponentRole = isChaser ? 'Evader' : 'Chaser'
+    return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} transport="async" />
+  }
+  if (!gameState) return <StatusScreen message="Loading…" />
+
+  return (
+    <ActiveGame
+      gameState={gameState}
+      playerRole={playerRole}
+      waitingForPartner={waitingForPartner}
+      canStartNextRound={true}
       submitPlan={submitPlan}
       startNextRound={startNextRound}
     />
@@ -346,8 +394,21 @@ function AIGameView({
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 type GameConfig =
-  | { mode: 'pvp'; code: string; role: 1 | 2; settings: MatchSettings | null }
+  | { mode: 'pvp'; transport: Transport; code: string; role: 1 | 2; settings: MatchSettings | null }
   | { mode: 'ai';  settings: MatchSettings; aiStrategy: SimulationAgent }
+
+/**
+ * The room creator is player 1; a link-opener is player 2. We persist the creator's role
+ * keyed by room code so that reopening or refreshing their own (?room=…) URL resumes the
+ * host side instead of being mistaken for a joiner.
+ */
+function roleStorageKey(code: string): string {
+  return `hextag-role-${code}`
+}
+
+function persistedRole(code: string): 1 | 2 {
+  return localStorage.getItem(roleStorageKey(code)) === '1' ? 1 : 2
+}
 
 export default function App() {
   const params = new URLSearchParams(window.location.search)
@@ -356,15 +417,26 @@ export default function App() {
 
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(() => {
     const code = params.get('room')
-    return code ? { mode: 'pvp', code: code.toUpperCase(), role: 2, settings: null } : null
+    if (!code) return null
+    const upper = code.toUpperCase()
+    const transport: Transport = params.get('mode') === 'async' ? 'async' : 'live'
+    return { mode: 'pvp', transport, code: upper, role: persistedRole(upper), settings: null }
   })
 
   const handleCreateGame = useCallback((lobby: LobbySettings) => {
     const code = generateRoomCode()
     const url = new URL(window.location.href)
     url.searchParams.set('room', code)
+    if (lobby.transport === 'async') url.searchParams.set('mode', 'async')
     history.replaceState(null, '', url.toString())
-    setGameConfig({ mode: 'pvp', code, role: 1, settings: resolveMatchSettings(lobby) })
+    localStorage.setItem(roleStorageKey(code), '1')
+    setGameConfig({
+      mode: 'pvp',
+      transport: lobby.transport,
+      code,
+      role: 1,
+      settings: resolveMatchSettings(lobby),
+    })
   }, [])
 
   const handlePlayVsAI = useCallback((lobby: LobbySettings, aiStrategy: SimulationAgent) => {
@@ -386,6 +458,16 @@ export default function App() {
 
   if (gameConfig.mode === 'ai') {
     return <AIGameView settings={gameConfig.settings} aiStrategy={gameConfig.aiStrategy} />
+  }
+
+  if (gameConfig.transport === 'async') {
+    return (
+      <AsyncGameView
+        roomCode={gameConfig.code}
+        playerRole={gameConfig.role}
+        settings={gameConfig.settings}
+      />
+    )
   }
 
   return (

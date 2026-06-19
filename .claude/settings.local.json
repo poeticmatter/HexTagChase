@@ -6,7 +6,8 @@
       "Bash(npm run:*)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
       "Bash(git fetch:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "PowerShell(npm install @supabase/supabase-js)"
     ]
   }
 }

@@ -90,11 +90,14 @@ alter publication supabase_realtime add table public.games;
 ```
 
 Notes for the executing agent:
-- The Supabase MCP is available. Use it to create/select a project, then
-  `apply_migration` with the SQL above. Capture the project URL via `get_project_url`
-  and the publishable key via `get_publishable_keys`.
-- After the migration, run `get_advisors` (security lint) and note that the permissive
-  RLS policies are intentional for this trusted-playtest use case.
+- **Create the migration file only — do not apply it.** You do not have access to the
+  project, and you must not run `npx supabase db push` or any CLI against it. The SQL file
+  is the canonical, source-controlled schema artifact; applying it is handled outside your
+  scope (the project owner runs it via the dashboard SQL editor, or via the Supabase MCP in
+  the owner's session). Critically, your TypeScript must compile and `npm run build` must
+  pass **without the table existing** — do not probe the schema at build time.
+- The permissive RLS policies are intentional for this trusted-playtest use case; a
+  security advisor will flag them, and that is expected, not a defect to fix.
 - Each `TurnPlan` already carries `.turn`, which is the anti-stale key (mirrors the
   `msg.plan.turn !== current.turn` guard in `useHexGame.ts`).
 
@@ -113,7 +116,13 @@ Notes for the executing agent:
    readable "Supabase not configured" error there.
 
 2. **`src/lib/asyncGameApi.ts`** — thin async wrappers around the table. All game rules
-   stay in `hexGameLogic.ts`; this file is pure I/O plus the resolve-orchestration:
+   stay in `hexGameLogic.ts`; this file is pure I/O plus the resolve-orchestration.
+   **Error policy:** check the `{ data, error }` of every Supabase call and `throw` on
+   `error` — never swallow, never return a sentinel for transport failures. `useHexGameAsync`
+   is the handling boundary: it try/catches these and maps them to `ConnectionStatus`
+   (`setStatus('error')` + `setErrorMsg`). The one exception is a *missing row* on
+   `loadGame` (room not found) — that is normal control flow, so return `null` and let the
+   hook render "Game not found," not a thrown error.
    - `createGame(code, settings): Promise<GameState>` — `buildInitialState(settings)`,
      then `insert` the row (`p2_joined` defaults to false). Returns the initial state.
    - `loadGame(code): Promise<{ state, p1_plan, p2_plan, p2_joined } | null>` — `select`
@@ -167,11 +176,18 @@ Notes for the executing agent:
      `transport` to the pvp config so `role`/`code`/`settings` plumbing is reused.
    - Route async configs to a new `AsyncGameView` that calls `useHexGameAsync` instead of
      `useHexGame` and renders the same `ActiveGame`.
-   - **Join path:** when arriving via `?room=CODE`, the joiner's `settings` are unknown
-     locally — in async mode they must come from the loaded row (`state.settings`), not
-     from `resolveMatchSettings`. `useHexGameAsync` should load settings from the row for
-     role 2 rather than expecting them as a prop. Decide role with the same convention as
-     today (creator = role 1, link-opener = role 2) and persist it (next item).
+   - **Transport is encoded in the URL, not probed.** Async share links carry
+     `?room=CODE&mode=async`; live links stay `?room=CODE`. On join, read
+     `params.get('mode')` — absent defaults to `'live'`, which keeps every existing link
+     working unchanged. Do **not** "try Supabase, fall back to PeerJS": explicit is better
+     than implicit, it avoids a failed lookup on every live join, and it lets live-mode
+     joiners work with no Supabase config present. Append `&mode=async` when building the
+     async share URL (the `WaitingForPartner` URL builder at `App.tsx:48`).
+   - **Join path:** when arriving via `?room=CODE&mode=async`, the joiner's `settings` are
+     unknown locally — they must come from the loaded row (`state.settings`), not from
+     `resolveMatchSettings`. `useHexGameAsync` should load settings from the row for role 2
+     rather than expecting them as a prop. Decide role with the same convention as today
+     (creator = role 1, link-opener = role 2) and persist it (next item).
    - **Role persistence:** store the assigned `playerRole` in `localStorage` keyed by room
      code so reopening the link resumes the same side instead of re-assigning.
 
