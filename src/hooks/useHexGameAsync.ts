@@ -59,9 +59,18 @@ export function useHexGameAsync(
     async function init() {
       try {
         if (playerRole === 1) {
-          if (!settings) return
+          // Load first: a reopened host already has a row in the database and must not
+          // depend on `settings`, which lives only in the original creating tab's memory.
+          // `settings` is required only to create a brand-new game.
           let existing = await loadGame(roomCode)
           if (!existing) {
+            if (!settings) {
+              if (!cancelled) {
+                setErrorMsg('Game not found. Check the link.')
+                setStatus('error')
+              }
+              return
+            }
             await createGame(roomCode, settings)
             existing = await loadGame(roomCode)
           }

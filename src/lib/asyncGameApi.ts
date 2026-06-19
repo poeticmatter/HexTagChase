@@ -24,16 +24,21 @@ export interface GameRow {
   p2_joined: boolean
 }
 
-/** Creates the game row from resolved settings and returns the initial state. */
-export async function createGame(code: string, settings: MatchSettings): Promise<GameState> {
+/**
+ * Creates the game row from resolved settings if it does not already exist.
+ *
+ * Idempotent (insert-on-conflict-do-nothing): a duplicate room code is a no-op rather
+ * than a 409, so a double-invoked effect (React StrictMode) or a host reopening a link
+ * can't collide on the primary key or reset an in-progress game's state.
+ */
+export async function createGame(code: string, settings: MatchSettings): Promise<void> {
   const state = buildInitialState(settings)
 
   const { error } = await getSupabase()
     .from(TABLE)
-    .insert({ id: code, settings, state, p2_joined: false })
+    .upsert({ id: code, settings, state, p2_joined: false }, { onConflict: 'id', ignoreDuplicates: true })
 
   if (error) throw error
-  return state
 }
 
 /** Loads a game by room code. Returns null when no such room exists. */
