@@ -3,6 +3,7 @@ import type { LobbySettings, Transport } from '../lib/matchConfig'
 import { mapRegistry } from '../lib/mapRegistry'
 import { MapThumbnail } from './MapThumbnail'
 import type { SimulationAgent } from '../lib/simulationAgent'
+import type { WinCondition } from '../types'
 
 interface LobbyFormState {
   maxTurns: number
@@ -12,6 +13,9 @@ interface LobbyFormState {
   opponentType: 'human' | 'ai'
   aiStrategy: SimulationAgent
   transport: Transport
+  winCondition: WinCondition
+  objectivesTarget: number
+  objectivesVisible: boolean
 }
 
 const DEFAULT_FORM: LobbyFormState = {
@@ -22,6 +26,9 @@ const DEFAULT_FORM: LobbyFormState = {
   opponentType: 'human',
   aiStrategy: 'greedy',
   transport: 'async',
+  winCondition: 'survive_turns',
+  objectivesTarget: 5,
+  objectivesVisible: true,
 }
 
 const TRANSPORT_LABELS: Record<Transport, string> = {
@@ -50,6 +57,9 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
     baseMovement: form.baseMovement,
     mapId: form.mapId,
     transport: form.transport,
+    winCondition: form.winCondition,
+    objectivesTarget: form.objectivesTarget,
+    objectivesVisible: form.objectivesVisible,
   }
 
   return (
@@ -66,7 +76,7 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
         {/* Turn limit */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-            Turn Limit
+            {form.winCondition === 'collect_objectives' ? 'Turn Limit (Failsafe)' : 'Turn Limit'}
           </label>
           <div className="flex items-center gap-3">
             <input
@@ -130,6 +140,89 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
           <p className="text-xs text-neutral-500 leading-relaxed">
             Base movement points per turn.
           </p>
+        </div>
+
+        {/* Win condition */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+            Evader Goal
+          </label>
+          <div className="flex rounded-lg overflow-hidden border border-neutral-700">
+            {([
+              ['survive_turns',      'Survive Turns'],
+              ['collect_objectives', 'Collect Objectives'],
+            ] as [WinCondition, string][]).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setForm(f => ({ ...f, winCondition: value }))}
+                className={`flex-1 py-2 text-sm font-semibold transition-colors ${
+                  form.winCondition === value
+                    ? 'bg-amber-700 text-white'
+                    : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {form.winCondition === 'collect_objectives' && (
+            <div className="flex flex-col gap-2 mt-1 p-3 bg-neutral-800 rounded-lg border border-neutral-700">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                  Objectives to Collect
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={form.objectivesTarget}
+                    onChange={e => setForm(f => ({ ...f, objectivesTarget: Number(e.target.value) }))}
+                    className="flex-1 accent-amber-500"
+                  />
+                  <span className="text-sm font-mono text-neutral-200 w-4 text-right">
+                    {form.objectivesTarget}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                  Objectives Visible to Chaser
+                </label>
+                <div className="flex rounded-lg overflow-hidden border border-neutral-600">
+                  {([
+                    [true,  'Visible'],
+                    [false, 'Hidden'],
+                  ] as [boolean, string][]).map(([value, label]) => (
+                    <button
+                      key={String(value)}
+                      onClick={() => setForm(f => ({ ...f, objectivesVisible: value }))}
+                      className={`flex-1 py-2 text-sm font-semibold transition-colors ${
+                        form.objectivesVisible === value
+                          ? 'bg-neutral-600 text-white'
+                          : 'bg-neutral-900 text-neutral-500 hover:text-neutral-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  {form.objectivesVisible
+                    ? 'Chaser can see objective locations.'
+                    : 'Chaser only sees when an objective is collected.'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {form.winCondition === 'survive_turns' && (
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              Evader wins by reaching the turn limit without being tagged.
+            </p>
+          )}
         </div>
 
         {/* Opponent */}

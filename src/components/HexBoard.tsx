@@ -276,6 +276,8 @@ interface Props {
   editorMode?: boolean
   suppressValidHighlight?: boolean
   onWallToggle?: (w: WallCoord) => void
+  objectives?: HexCoord[]
+  showObjectives?: boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -288,7 +290,8 @@ export function HexBoard({
   currentStep, draft, waitingForPartner, winner,
   showCoords, validTargets, onHexClick,
   isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle,
-  heatmapData, heatmapColor = '#ef4444'
+  heatmapData, heatmapColor = '#ef4444',
+  objectives = [], showObjectives = true,
 }: Props) {
   const isoY = isOrthographic ? 1.0 : 0.55
   const { width, height, offsetX, offsetY } = boardDimensions(isoY)
@@ -747,6 +750,31 @@ export function HexBoard({
           })}
         </g>
       )}
+
+      {/* ── Objectives ── */}
+      {showObjectives && objectives.map((obj, i) => {
+        const { x, y } = tileSurface(obj.q, obj.r)
+        return (
+          <g key={`obj-${i}`} transform={`translate(${x},${y})`} style={{ pointerEvents: 'none' }}>
+            {/* Glowing base ring */}
+            <ellipse cx={0} cy={0} rx={10} ry={10 * isoY} fill="#fbbf24" opacity={0.25} />
+            {/* Star shape — 4 points */}
+            <polygon
+              points="0,-11 3,-3 11,0 3,3 0,11 -3,3 -11,0 -3,-3"
+              fill="#fbbf24"
+              stroke="#f59e0b"
+              strokeWidth={1}
+              transform="rotate(0)"
+            />
+            {/* Inner shine */}
+            <polygon
+              points="0,-5 1.5,-1.5 5,0 1.5,1.5 0,5 -1.5,1.5 -5,0 -1.5,-1.5"
+              fill="#fef3c7"
+              opacity={0.8}
+            />
+          </g>
+        )
+      })}
 
       {/* ── Player cylinders ── */}
       {[

@@ -30,11 +30,16 @@ export interface MapDefinition {
   rules?: MapRule[]
 }
 
+export type WinCondition = 'survive_turns' | 'collect_objectives'
+
 export interface MatchSettings {
   maxTurns: number
   chaserPlayer: 1 | 2
   baseMovement: 1 | 2
   mapId: string
+  winCondition: WinCondition
+  objectivesTarget: number
+  objectivesVisible: boolean
 }
 
 // ── Symmetrical turn plans ─────────────────────────────────────────────────────
@@ -106,6 +111,9 @@ export interface GameState {
   p1TurnData: PlayerTurnData
   p2TurnData: PlayerTurnData
   lastResolution: ResolutionSummary | null
+  objectives: HexCoord[]
+  objectivesCollected: number
+  lastCollectedObjective: HexCoord | null
 }
 
 export type ConnectionStatus =

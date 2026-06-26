@@ -1,4 +1,4 @@
-import type { MatchSettings } from '../types'
+import type { MatchSettings, WinCondition } from '../types'
 
 /** Network transport for a player-vs-player game. */
 export type Transport = 'live' | 'async'
@@ -12,6 +12,9 @@ export interface LobbySettings {
   baseMovement: 1 | 2
   mapId: string
   transport: Transport
+  winCondition: WinCondition
+  objectivesTarget: number
+  objectivesVisible: boolean
 }
 
 /**
@@ -24,5 +27,8 @@ export function resolveMatchSettings(lobby: LobbySettings): MatchSettings {
     chaserPlayer: lobby.hostRole === 'Chaser' ? 1 : 2,
     baseMovement: lobby.baseMovement,
     mapId: lobby.mapId,
+    winCondition: lobby.winCondition,
+    objectivesTarget: lobby.objectivesTarget,
+    objectivesVisible: lobby.objectivesVisible,
   }
 }

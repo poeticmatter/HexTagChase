@@ -9,6 +9,90 @@ import {
 } from './hexGrid'
 import { mapRegistry } from './mapRegistry'
 
+// ── Objective spawning ─────────────────────────────────────────────────────
+
+/**
+ * Spawns an objective on a valid hex, biased toward hexes that are spread away
+ * from existing objectives and both player positions. "Human-like" random: avoids
+ * clustering by scoring candidates by their minimum distance to avoid-points, then
+ * sampling from the top half of candidates with some noise.
+ */
+export function spawnObjective(
+  elevations: Record<string, number>,
+  obstacles: HexCoord[],
+  avoid: HexCoord[],
+  existing: HexCoord[],
+): HexCoord | null {
+  const MIN_DIST = 4
+
+  const blockedKeys = new Set([
+    ...obstacles.map(h => `${h.q},${h.r}`),
+    ...existing.map(h => `${h.q},${h.r}`),
+    ...avoid.map(h => `${h.q},${h.r}`),
+    '0,0', // center hex always excluded
+  ])
+
+  const isTooClose = (q: number, r: number) =>
+    existing.some(o => hexDistance(q, r, o.q, o.r) < MIN_DIST) ||
+    avoid.some(a => hexDistance(q, r, a.q, a.r) < MIN_DIST)
+
+  let candidates = getAllHexes().filter(({ q, r }) => {
+    if (getBaseElevation(q, r, elevations) === -1) return false
+    if (blockedKeys.has(`${q},${r}`)) return false
+    if (isTooClose(q, r)) return false
+    return true
+  })
+
+  // If the hard constraints leave nothing, relax the avoid-distance but keep existing-distance
+  if (candidates.length === 0) {
+    candidates = getAllHexes().filter(({ q, r }) => {
+      if (getBaseElevation(q, r, elevations) === -1) return false
+      if (blockedKeys.has(`${q},${r}`)) return false
+      if (existing.some(o => hexDistance(q, r, o.q, o.r) < MIN_DIST)) return false
+      return true
+    })
+  }
+
+  // Last resort: any non-blocked, passable hex
+  if (candidates.length === 0) {
+    candidates = getAllHexes().filter(({ q, r }) =>
+      getBaseElevation(q, r, elevations) !== -1 && !blockedKeys.has(`${q},${r}`)
+    )
+  }
+
+  if (candidates.length === 0) return null
+
+  // Score each candidate: higher score = more spread out from existing objectives and players
+  const scored = candidates.map(hex => {
+    const distToExisting = existing.length > 0
+      ? Math.min(...existing.map(o => hexDistance(hex.q, hex.r, o.q, o.r)))
+      : Infinity
+    const distToAvoid = avoid.length > 0
+      ? Math.min(...avoid.map(a => hexDistance(hex.q, hex.r, a.q, a.r)))
+      : Infinity
+    return { hex, score: distToExisting + distToAvoid * 0.5 }
+  })
+
+  scored.sort((a, b) => b.score - a.score)
+
+  // Sample from the top half to preserve spread while adding variety
+  const pool = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)))
+  return pool[Math.floor(Math.random() * pool.length)].hex
+}
+
+function spawnInitialObjectives(
+  elevations: Record<string, number>,
+  obstacles: HexCoord[],
+  chaserStart: HexCoord,
+  evaderStart: HexCoord,
+): HexCoord[] {
+  const avoid = [chaserStart, evaderStart]
+  const first = spawnObjective(elevations, obstacles, avoid, [])
+  if (!first) return []
+  const second = spawnObjective(elevations, obstacles, avoid, [first])
+  return second ? [first, second] : [first]
+}
+
 // ── Obstacles ──────────────────────────────────────────────────────────────
 
 export function buildInitialState(settings: MatchSettings): GameState {
@@ -18,6 +102,9 @@ export function buildInitialState(settings: MatchSettings): GameState {
   }
 
   const elevations = buildElevationsMap(mapDef)
+  const objectives = settings.winCondition === 'collect_objectives'
+    ? spawnInitialObjectives(elevations, mapDef.obstacles, mapDef.chaserStart, mapDef.evaderStart)
+    : []
 
   return {
     settings,
@@ -39,6 +126,9 @@ export function buildInitialState(settings: MatchSettings): GameState {
     p1TurnData: {},
     p2TurnData: {},
     lastResolution: null,
+    objectives,
+    objectivesCollected: 0,
+    lastCollectedObjective: null,
   }
 }
 
@@ -348,6 +438,10 @@ export function buildNextRoundState(prevState: GameState): GameState {
 
   const elevations = buildElevationsMap(mapDef)
 
+  const objectives = newSettings.winCondition === 'collect_objectives'
+    ? spawnInitialObjectives(elevations, mapDef.obstacles, mapDef.chaserStart, mapDef.evaderStart)
+    : []
+
   return {
     ...prevState,
     settings: newSettings,
@@ -371,6 +465,9 @@ export function buildNextRoundState(prevState: GameState): GameState {
     transientContext: {},
     turnSchema: buildPlanningSchema(),
     lastResolution: null,
+    objectives,
+    objectivesCollected: 0,
+    lastCollectedObjective: null,
   }
 }
 
@@ -437,7 +534,39 @@ function _resolveRound(state: GameState): GameState {
     }
   }
 
-  const evaderSurvived = !chaserCatches && state.turn >= state.settings.maxTurns
+  // Check objective collection before deciding the winner
+  let objectives = state.objectives
+  let objectivesCollected = state.objectivesCollected
+  let lastCollectedObjective: typeof state.lastCollectedObjective = null
+
+  if (state.settings.winCondition === 'collect_objectives') {
+    const evaderKey = `${finalEvaderPos.q},${finalEvaderPos.r}`
+    const hitIndex = objectives.findIndex(o => `${o.q},${o.r}` === evaderKey)
+    if (hitIndex !== -1) {
+      const collected = objectives[hitIndex]
+      lastCollectedObjective = collected
+      objectivesCollected += 1
+      // Spawn a replacement biased away from the remaining objective and both players
+      const remaining = objectives.filter((_, i) => i !== hitIndex)
+      const newObj = spawnObjective(
+        state.elevations, state.obstacles,
+        [finalChaserPos, finalEvaderPos],
+        remaining,
+      )
+      objectives = newObj ? [...remaining, newObj] : remaining
+    }
+  }
+
+  const evaderCollectedAll =
+    state.settings.winCondition === 'collect_objectives' &&
+    objectivesCollected >= state.settings.objectivesTarget
+
+  const evaderSurvived =
+    !chaserCatches && (
+      evaderCollectedAll ||
+      (state.settings.winCondition === 'survive_turns' && state.turn >= state.settings.maxTurns)
+    )
+
   const winner: Role | null = chaserCatches ? 'chaser' : evaderSurvived ? 'evader' : null
 
   // Apply map rules to mutate terrain for the next turn
@@ -504,6 +633,9 @@ function _resolveRound(state: GameState): GameState {
     transientContext: {},
     turnSchema: buildPlanningSchema(),
     lastResolution: { chaserPredHit, evaderPredHit },
+    objectives,
+    objectivesCollected,
+    lastCollectedObjective,
   }
 }
 

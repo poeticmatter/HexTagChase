@@ -134,6 +134,7 @@ function ActiveGame({
 }: ActiveGameProps) {
   const [draft, setDraft] = useState<DraftPlan>(EMPTY_DRAFT)
   const [showCoords, setShowCoords] = useState(false)
+  const [objectiveFlash, setObjectiveFlash] = useState(false)
 
   const handleConfirm = useCallback((plan: TurnPlan) => {
     submitPlan(plan)
@@ -147,6 +148,14 @@ function ActiveGame({
   useEffect(() => {
     setDraft(EMPTY_DRAFT)
   }, [gameState.turn])
+
+  // Flash notification whenever an objective is collected.
+  useEffect(() => {
+    if (gameState.objectivesCollected === 0) return
+    setObjectiveFlash(true)
+    const t = setTimeout(() => setObjectiveFlash(false), 2000)
+    return () => clearTimeout(t)
+  }, [gameState.objectivesCollected])
 
   const isChaser         = gameState.settings.chaserPlayer === playerRole
   const roleKey          = isChaser ? 'chaser' : 'evader'
@@ -206,6 +215,11 @@ function ActiveGame({
         <span className="text-neutral-500 text-sm">
           Turn {Math.min(gameState.turn, maxTurns)} / {maxTurns}
         </span>
+        {gameState.settings.winCondition === 'collect_objectives' && (
+          <span className="text-amber-400 text-sm font-semibold">
+            {gameState.objectivesCollected} / {gameState.settings.objectivesTarget} objectives
+          </span>
+        )}
         <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
           isChaser
             ? 'bg-red-900/50 text-red-400 border-red-800'
@@ -225,6 +239,12 @@ function ActiveGame({
         </button>
       </div>
 
+      {objectiveFlash && (
+        <div className="px-4 py-2 bg-amber-900/70 border border-amber-600 rounded-lg text-amber-300 text-sm font-semibold animate-pulse">
+          Objective collected! ({gameState.objectivesCollected} / {gameState.settings.objectivesTarget})
+        </div>
+      )}
+
       <HexBoard
         myPos={myPos}
         opponentPos={opponentPos}
@@ -242,6 +262,8 @@ function ActiveGame({
         winner={gameState.winner}
         validTargets={validTargets}
         onHexClick={handleHexClick}
+        objectives={gameState.objectives}
+        showObjectives={!isChaser || gameState.settings.objectivesVisible}
       />
 
       {gameState.matchState.matchWinner ? (

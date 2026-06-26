@@ -12,7 +12,10 @@ export function runSimulation(
     mapId: config.mapId,
     baseMovement: config.baseMovement,
     maxTurns: config.maxTurns,
-    chaserPlayer: 1, // Doesn't matter for symmetric simulation
+    chaserPlayer: 1,
+    winCondition: 'survive_turns',
+    objectivesTarget: 5,
+    objectivesVisible: true,
   }
 
   let chaserWins = 0
