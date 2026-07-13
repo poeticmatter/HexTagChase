@@ -3,7 +3,7 @@ import type { LobbySettings, Transport } from '../lib/matchConfig'
 import { mapRegistry } from '../lib/mapRegistry'
 import { MapThumbnail } from './MapThumbnail'
 import type { SimulationAgent } from '../lib/simulationAgent'
-import type { WinCondition } from '../types'
+import type { MovementMode, WinCondition } from '../types'
 
 interface LobbyFormState {
   maxTurns: number
@@ -16,6 +16,9 @@ interface LobbyFormState {
   winCondition: WinCondition
   objectivesTarget: number
   objectivesVisible: boolean
+  movementMode: MovementMode
+  startingMovementPoints: number
+  maxSpendPerTurn: number
 }
 
 const DEFAULT_FORM: LobbyFormState = {
@@ -29,6 +32,9 @@ const DEFAULT_FORM: LobbyFormState = {
   winCondition: 'survive_turns',
   objectivesTarget: 5,
   objectivesVisible: true,
+  movementMode: 'fixed',
+  startingMovementPoints: 10,
+  maxSpendPerTurn: 0,
 }
 
 const TRANSPORT_LABELS: Record<Transport, string> = {
@@ -60,6 +66,9 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
     winCondition: form.winCondition,
     objectivesTarget: form.objectivesTarget,
     objectivesVisible: form.objectivesVisible,
+    movementMode: form.movementMode,
+    startingMovementPoints: form.startingMovementPoints,
+    maxSpendPerTurn: form.maxSpendPerTurn,
   }
 
   return (
@@ -117,29 +126,99 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
           </div>
         </div>
 
-        {/* Base movement */}
+        {/* Movement mode */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-            Base Movement
+            Movement Mode
           </label>
           <div className="flex rounded-lg overflow-hidden border border-neutral-700">
-            {([1, 2] as const).map(option => (
+            {([
+              ['fixed', 'Fixed'],
+              ['pool',  'Pool'],
+            ] as [MovementMode, string][]).map(([value, label]) => (
               <button
-                key={option}
-                onClick={() => setForm(f => ({ ...f, baseMovement: option }))}
+                key={value}
+                onClick={() => setForm(f => ({ ...f, movementMode: value }))}
                 className={`flex-1 py-2 text-sm font-semibold transition-colors ${
-                  form.baseMovement === option
-                    ? 'bg-neutral-600 text-white'
+                  form.movementMode === value
+                    ? 'bg-teal-700 text-white'
                     : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                {option}
+                {label}
               </button>
             ))}
           </div>
-          <p className="text-xs text-neutral-500 leading-relaxed">
-            Base movement points per turn.
-          </p>
+
+          {form.movementMode === 'fixed' && (
+            <>
+              <div className="flex rounded-lg overflow-hidden border border-neutral-700 mt-1">
+                {([1, 2] as const).map(option => (
+                  <button
+                    key={option}
+                    onClick={() => setForm(f => ({ ...f, baseMovement: option }))}
+                    className={`flex-1 py-2 text-sm font-semibold transition-colors ${
+                      form.baseMovement === option
+                        ? 'bg-neutral-600 text-white'
+                        : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-neutral-500 leading-relaxed">
+                Base movement points per turn.
+              </p>
+            </>
+          )}
+
+          {form.movementMode === 'pool' && (
+            <div className="flex flex-col gap-2 mt-1 p-3 bg-neutral-800 rounded-lg border border-neutral-700">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                  Starting Movement Points
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={4}
+                    max={30}
+                    value={form.startingMovementPoints}
+                    onChange={e => setForm(f => ({ ...f, startingMovementPoints: Number(e.target.value) }))}
+                    className="flex-1 accent-teal-500"
+                  />
+                  <span className="text-sm font-mono text-neutral-200 w-6 text-right">
+                    {form.startingMovementPoints}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                  Max Spend Per Turn
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    value={form.maxSpendPerTurn}
+                    onChange={e => setForm(f => ({ ...f, maxSpendPerTurn: Number(e.target.value) }))}
+                    className="flex-1 accent-teal-500"
+                  />
+                  <span className="text-sm font-mono text-neutral-200 w-14 text-right">
+                    {form.maxSpendPerTurn === 0 ? 'Unlimited' : form.maxSpendPerTurn}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-neutral-500 leading-relaxed">
+                Both players share a match-long movement pool. Spend as much or as little
+                as you want each turn — a correct prediction adds +1 to your total.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Win condition */}

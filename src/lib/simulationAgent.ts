@@ -1,5 +1,5 @@
 import { GameState, TurnPlan, Role, HexCoord } from '../types'
-import { reachableDestinations, buildWallSet } from './hexGameLogic'
+import { reachableDestinations, buildWallSet, effectiveTurnBudget } from './hexGameLogic'
 import { hexDistance } from './hexGrid'
 
 export type SimulationAgent = 'random' | 'greedy' | 'lookahead'
@@ -25,9 +25,14 @@ export function produceTurnPlan(
   const myBudget = isChaser ? chaserBudget : evaderBudget
   const oppBudget = isChaser ? evaderBudget : chaserBudget
   const walls = buildWallSet(gameState.walls)
+  const allowStay = gameState.settings.movementMode === 'pool'
 
-  const myReachable = reachableDestinations(myPos, gameState.elevations, walls, myBudget)
-  const oppReachable = reachableDestinations(oppPos, gameState.elevations, walls, oppBudget)
+  const myReachable = reachableDestinations(
+    myPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, myBudget), allowStay,
+  )
+  const oppReachable = reachableDestinations(
+    oppPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, oppBudget), allowStay,
+  )
 
   // 1. Movement selection
   const { dest: moveDest, path: movePath } = agent === 'random'

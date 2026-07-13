@@ -119,8 +119,8 @@ export function buildInitialState(settings: MatchSettings): GameState {
     elevations,
     walls: mapDef.walls,
     rules: mapDef.rules ?? [],
-    p1Budget: settings.baseMovement ?? 2,
-    p2Budget: settings.baseMovement ?? 2,
+    p1Budget: startingBudget(settings),
+    p2Budget: startingBudget(settings),
     transientContext: {},
     turnSchema: buildPlanningSchema(),
     p1TurnData: {},
@@ -130,6 +130,13 @@ export function buildInitialState(settings: MatchSettings): GameState {
     objectivesCollected: 0,
     lastCollectedObjective: null,
   }
+}
+
+/** Initial per-player movement budget for a brand-new match. */
+function startingBudget(settings: MatchSettings): number {
+  return settings.movementMode === 'pool'
+    ? settings.startingMovementPoints
+    : settings.baseMovement ?? 2
 }
 
 // ── Obstacles ──────────────────────────────────────────────────────────────
@@ -334,6 +341,32 @@ export function calculateEdgeCost(
   return baseCost + (isWall ? 1 : 0)
 }
 
+/** Total cost of walking a path (as returned by reachableDestinations) from a start hex. */
+function pathCost(
+  start: HexCoord,
+  path: HexCoord[],
+  elevations: Record<string, number>,
+  walls: Set<string>,
+): number {
+  let cost = 0
+  let cur = start
+  for (const step of path) {
+    cost += calculateEdgeCost(cur, step, elevations, walls)
+    cur = step
+  }
+  return cost
+}
+
+/**
+ * Caps a player's remaining movement pool to the per-turn spending limit.
+ * Only meaningful in 'pool' mode — fixed mode has no separate per-turn cap.
+ */
+export function effectiveTurnBudget(settings: MatchSettings, remainingPoints: number): number {
+  if (settings.movementMode !== 'pool') return remainingPoints
+  if (settings.maxSpendPerTurn <= 0) return remainingPoints
+  return Math.min(remainingPoints, settings.maxSpendPerTurn)
+}
+
 // ── Neighbors ─────────────────────────────────────────────────────────────
 
 /** All valid neighbors of a cell for standard non-gameplay queries (ignores obstacles, checks walls).
@@ -365,6 +398,7 @@ export function reachableDestinations(
   elevations: Record<string, number>,
   walls: Set<string> = new Set(),
   budget = 2,
+  allowStay = false,
 ): Map<string, HexCoord[]> {
   const startKey = `${pos.q},${pos.r}`
   const bestCost = new Map<string, number>([[startKey, 0]])
@@ -376,6 +410,8 @@ export function reachableDestinations(
   ]
 
   const reachablePaths = new Map<string, HexCoord[]>()
+  // 'pool' mode lets a player spend nothing this turn and just hold position.
+  if (allowStay) reachablePaths.set(startKey, [])
 
   while (queue.length > 0) {
     // Sort to act as priority queue (process lowest cost first)
@@ -458,8 +494,10 @@ export function buildNextRoundState(prevState: GameState): GameState {
     obstacles: mapDef.obstacles,
     elevations,
     rules: mapDef.rules ?? [],
-    p1Budget: newSettings.baseMovement ?? 2,
-    p2Budget: newSettings.baseMovement ?? 2,
+    // The movement pool is scoped to the whole match, not the round — carry it forward.
+    // Fixed-mode budgets reset every round exactly as before.
+    p1Budget: newSettings.movementMode === 'pool' ? prevState.p1Budget : (newSettings.baseMovement ?? 2),
+    p2Budget: newSettings.movementMode === 'pool' ? prevState.p2Budget : (newSettings.baseMovement ?? 2),
     p1TurnData: {},
     p2TurnData: {},
     transientContext: {},
@@ -606,10 +644,26 @@ function _resolveRound(state: GameState): GameState {
   const chaserPredHit = p1Plan.type === 'chaser' ? p1PredHit : p2PredHit
   const evaderPredHit = p2Plan.type === 'evader' ? p2PredHit : p1PredHit
 
-  // Determine budgets for next round
-  const baseMovement = state.settings.baseMovement ?? 2
-  let nextP1Budget = baseMovement
-  let nextP2Budget = baseMovement
+  // Determine budgets for next turn
+  let nextP1Budget: number
+  let nextP2Budget: number
+
+  if (state.settings.movementMode === 'pool') {
+    // Pool mode: deduct what was actually spent (post-collision path) from the
+    // running total rather than resetting to a flat per-turn allowance.
+    const wallSet = buildWallSet(state.walls)
+    const p1Path = p1Plan.type === 'chaser' ? finalChaserPath : finalEvaderPath
+    const p2Path = p2Plan.type === 'chaser' ? finalChaserPath : finalEvaderPath
+    const p1StartPos = p1Plan.type === 'chaser' ? state.chaserPos : state.evaderPos
+    const p2StartPos = p2Plan.type === 'chaser' ? state.chaserPos : state.evaderPos
+
+    nextP1Budget = state.p1Budget - pathCost(p1StartPos, p1Path, state.elevations, wallSet)
+    nextP2Budget = state.p2Budget - pathCost(p2StartPos, p2Path, state.elevations, wallSet)
+  } else {
+    const baseMovement = state.settings.baseMovement ?? 2
+    nextP1Budget = baseMovement
+    nextP2Budget = baseMovement
+  }
 
   if (!winner) {
     nextP1Budget += p1PredHit ? 1 : 0

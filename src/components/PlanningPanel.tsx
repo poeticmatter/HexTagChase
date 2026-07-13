@@ -1,4 +1,4 @@
-import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep } from '../types'
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, MovementMode } from '../types'
 
 export interface DraftPlan {
   moveDest: HexCoord | null
@@ -132,6 +132,12 @@ interface Props {
   waitingForPartner: boolean
   onConfirm: (plan: TurnPlan) => void
   onReset: () => void
+  /** Movement pool mode — when 'pool', shows the remaining pool and a "stay put" option. */
+  movementMode?: MovementMode
+  /** Remaining movement points, meaningful only when movementMode is 'pool'. */
+  movementPool?: number
+  /** Selects the player's current hex (0-cost move) as this turn's destination. */
+  onStay?: () => void
 }
 
 export function PlanningPanel({
@@ -145,6 +151,9 @@ export function PlanningPanel({
   waitingForPartner,
   onConfirm,
   onReset,
+  movementMode,
+  movementPool,
+  onStay,
 }: Props) {
   const steps = buildSteps(draft, schema, currentStep)
   const role = isChaser ? 'Chaser' : 'Evader'
@@ -172,6 +181,14 @@ export function PlanningPanel({
         <span className="text-xs text-neutral-500">{goal}</span>
       </div>
 
+      {/* Movement pool (pool mode only) */}
+      {movementMode === 'pool' && (
+        <div className="flex items-center justify-between rounded-lg border border-neutral-700 bg-neutral-800/40 px-3 py-1.5">
+          <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Movement pool</span>
+          <span className="text-sm font-mono text-neutral-200">{movementPool}</span>
+        </div>
+      )}
+
       {/* Last resolution */}
       {lastResolution && (
         <ResolutionBanner resolution={lastResolution} isChaser={isChaser} />
@@ -187,6 +204,14 @@ export function PlanningPanel({
             <StepIndicator label={s.label} done={s.done} active={s.active} />
           </div>
         ))}
+        {onStay && currentStep === 'select_movement' && (
+          <button
+            onClick={onStay}
+            className="mt-1 py-1.5 bg-neutral-700 hover:bg-neutral-600 active:bg-neutral-800 rounded-lg text-xs font-semibold text-neutral-300 transition-colors"
+          >
+            Stay put (0 pts)
+          </button>
+        )}
       </div>
 
       <div className="flex gap-2">

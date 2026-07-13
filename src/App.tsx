@@ -12,7 +12,7 @@ import { SimulatorView } from './components/SimulatorView'
 import type { HexCoord, TurnPlan, MatchSettings, GameState } from './types'
 import { resolveMatchSettings } from './lib/matchConfig'
 import type { LobbySettings, Transport } from './lib/matchConfig'
-import { buildWallSet, reachableDestinations } from './lib/hexGameLogic'
+import { buildWallSet, reachableDestinations, effectiveTurnBudget } from './lib/hexGameLogic'
 import type { SimulationAgent } from './lib/simulationAgent'
 
 function generateRoomCode(): string {
@@ -167,19 +167,23 @@ function ActiveGame({
     wallKeys: buildWallSet(gameState.walls),
   }), [gameState.walls, gameState.obstacles])
 
+  const allowStay = gameState.settings.movementMode === 'pool'
+
   const cachedMovePaths = useMemo<Map<string, HexCoord[]>>(() => {
     if (effectiveWaiting || gameState.winner) return new Map()
     const myPos    = isChaser ? gameState.chaserPos : gameState.evaderPos
     const myBudget = playerRole === 1 ? gameState.p1Budget : gameState.p2Budget
-    return reachableDestinations(myPos, gameState.elevations, topology.wallKeys, myBudget)
-  }, [gameState, topology, effectiveWaiting, isChaser, playerRole])
+    const budget   = effectiveTurnBudget(gameState.settings, myBudget)
+    return reachableDestinations(myPos, gameState.elevations, topology.wallKeys, budget, allowStay)
+  }, [gameState, topology, effectiveWaiting, isChaser, playerRole, allowStay])
 
   const cachedPredictPaths = useMemo<Map<string, HexCoord[]>>(() => {
     if (effectiveWaiting || gameState.winner) return new Map()
     const opponentPos    = isChaser ? gameState.evaderPos  : gameState.chaserPos
     const opponentBudget = playerRole === 1 ? gameState.p2Budget : gameState.p1Budget
-    return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, opponentBudget)
-  }, [gameState, topology, effectiveWaiting, isChaser])
+    const budget         = effectiveTurnBudget(gameState.settings, opponentBudget)
+    return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, budget, allowStay)
+  }, [gameState, topology, effectiveWaiting, isChaser, allowStay])
 
   const cachedMoveTargets    = useMemo(() => new Set(cachedMovePaths.keys()),    [cachedMovePaths])
   const cachedPredictTargets = useMemo(() => new Set(cachedPredictPaths.keys()), [cachedPredictPaths])
@@ -307,6 +311,9 @@ function ActiveGame({
             waitingForPartner={effectiveWaiting}
             onConfirm={handleConfirm}
             onReset={handleReset}
+            movementMode={gameState.settings.movementMode}
+            movementPool={playerRole === 1 ? gameState.p1Budget : gameState.p2Budget}
+            onStay={allowStay ? () => handleHexClick(myPos) : undefined}
           />
         </div>
       )}

@@ -1,4 +1,4 @@
-import type { MatchSettings, WinCondition } from '../types'
+import type { MatchSettings, MovementMode, WinCondition } from '../types'
 
 /** Network transport for a player-vs-player game. */
 export type Transport = 'live' | 'async'
@@ -15,6 +15,9 @@ export interface LobbySettings {
   winCondition: WinCondition
   objectivesTarget: number
   objectivesVisible: boolean
+  movementMode: MovementMode
+  startingMovementPoints: number
+  maxSpendPerTurn: number
 }
 
 /**
@@ -30,5 +33,8 @@ export function resolveMatchSettings(lobby: LobbySettings): MatchSettings {
     winCondition: lobby.winCondition,
     objectivesTarget: lobby.objectivesTarget,
     objectivesVisible: lobby.objectivesVisible,
+    movementMode: lobby.movementMode,
+    startingMovementPoints: lobby.startingMovementPoints,
+    maxSpendPerTurn: lobby.maxSpendPerTurn,
   }
 }

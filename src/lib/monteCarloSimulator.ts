@@ -16,6 +16,9 @@ export function runSimulation(
     winCondition: 'survive_turns',
     objectivesTarget: 5,
     objectivesVisible: true,
+    movementMode: 'fixed',
+    startingMovementPoints: 0,
+    maxSpendPerTurn: 0,
   }
 
   let chaserWins = 0
