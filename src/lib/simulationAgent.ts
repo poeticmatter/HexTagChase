@@ -28,10 +28,10 @@ export function produceTurnPlan(
   const allowStay = gameState.settings.movementMode === 'pool'
 
   const myReachable = reachableDestinations(
-    myPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, myBudget), allowStay,
+    myPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, myBudget, gameState.turn), allowStay,
   )
   const oppReachable = reachableDestinations(
-    oppPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, oppBudget), allowStay,
+    oppPos, gameState.elevations, walls, effectiveTurnBudget(gameState.settings, oppBudget, gameState.turn), allowStay,
   )
 
   // 1. Movement selection

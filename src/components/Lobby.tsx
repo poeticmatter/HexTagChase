@@ -18,7 +18,6 @@ interface LobbyFormState {
   objectivesVisible: boolean
   movementMode: MovementMode
   startingMovementPoints: number
-  maxSpendPerTurn: number
 }
 
 const DEFAULT_FORM: LobbyFormState = {
@@ -34,7 +33,6 @@ const DEFAULT_FORM: LobbyFormState = {
   objectivesVisible: true,
   movementMode: 'fixed',
   startingMovementPoints: 10,
-  maxSpendPerTurn: 0,
 }
 
 const TRANSPORT_LABELS: Record<Transport, string> = {
@@ -68,7 +66,6 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
     objectivesVisible: form.objectivesVisible,
     movementMode: form.movementMode,
     startingMovementPoints: form.startingMovementPoints,
-    maxSpendPerTurn: form.maxSpendPerTurn,
   }
 
   return (
@@ -194,28 +191,9 @@ export function Lobby({ onCreateGame, onPlayVsAI, onOpenSimulator }: Props) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-                  Max Spend Per Turn
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    value={form.maxSpendPerTurn}
-                    onChange={e => setForm(f => ({ ...f, maxSpendPerTurn: Number(e.target.value) }))}
-                    className="flex-1 accent-teal-500"
-                  />
-                  <span className="text-sm font-mono text-neutral-200 w-14 text-right">
-                    {form.maxSpendPerTurn === 0 ? 'Unlimited' : form.maxSpendPerTurn}
-                  </span>
-                </div>
-              </div>
-
               <p className="text-xs text-neutral-500 leading-relaxed">
-                Both players share a match-long movement pool. Spend as much or as little
-                as you want each turn — a correct prediction adds +1 to your total.
+                Both players share a game-long movement pool. The maximum movement limit escalates
+                each turn (1 on turn 1, 2 on turn 2, etc.). Correct predictions add +1 to your total.
               </p>
             </div>
           )}

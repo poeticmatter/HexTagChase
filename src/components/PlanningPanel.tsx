@@ -181,11 +181,17 @@ export function PlanningPanel({
         <span className="text-xs text-neutral-500">{goal}</span>
       </div>
 
-      {/* Movement pool (pool mode only) */}
+      {/* Movement pool + escalating turn limit (pool mode only) */}
       {movementMode === 'pool' && (
-        <div className="flex items-center justify-between rounded-lg border border-neutral-700 bg-neutral-800/40 px-3 py-1.5">
-          <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Movement pool</span>
-          <span className="text-sm font-mono text-neutral-200">{movementPool}</span>
+        <div className="flex flex-col gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800/40 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Movement pool</span>
+            <span className="text-sm font-mono text-neutral-200">{movementPool}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-neutral-700/50 pt-1.5">
+            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Turn limit (Max spend)</span>
+            <span className="text-sm font-mono text-neutral-200">{turn} pts</span>
+          </div>
         </div>
       )}
 

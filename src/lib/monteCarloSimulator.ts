@@ -18,7 +18,6 @@ export function runSimulation(
     objectivesVisible: true,
     movementMode: 'fixed',
     startingMovementPoints: 0,
-    maxSpendPerTurn: 0,
   }
 
   let chaserWins = 0

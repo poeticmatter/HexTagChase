@@ -132,7 +132,7 @@ export function buildInitialState(settings: MatchSettings): GameState {
   }
 }
 
-/** Initial per-player movement budget for a brand-new match. */
+/** Initial per-player movement budget for a brand-new game (round). */
 function startingBudget(settings: MatchSettings): number {
   return settings.movementMode === 'pool'
     ? settings.startingMovementPoints
@@ -358,13 +358,12 @@ function pathCost(
 }
 
 /**
- * Caps a player's remaining movement pool to the per-turn spending limit.
+ * Caps a player's remaining movement pool to the escalating per-turn limit (1 on Turn 1, 2 on Turn 2, etc.).
  * Only meaningful in 'pool' mode — fixed mode has no separate per-turn cap.
  */
-export function effectiveTurnBudget(settings: MatchSettings, remainingPoints: number): number {
+export function effectiveTurnBudget(settings: MatchSettings, remainingPoints: number, turn: number): number {
   if (settings.movementMode !== 'pool') return remainingPoints
-  if (settings.maxSpendPerTurn <= 0) return remainingPoints
-  return Math.min(remainingPoints, settings.maxSpendPerTurn)
+  return Math.min(remainingPoints, turn)
 }
 
 // ── Neighbors ─────────────────────────────────────────────────────────────
@@ -494,10 +493,10 @@ export function buildNextRoundState(prevState: GameState): GameState {
     obstacles: mapDef.obstacles,
     elevations,
     rules: mapDef.rules ?? [],
-    // The movement pool is scoped to the whole match, not the round — carry it forward.
+    // The movement pool resets every game (round) — reset it.
     // Fixed-mode budgets reset every round exactly as before.
-    p1Budget: newSettings.movementMode === 'pool' ? prevState.p1Budget : (newSettings.baseMovement ?? 2),
-    p2Budget: newSettings.movementMode === 'pool' ? prevState.p2Budget : (newSettings.baseMovement ?? 2),
+    p1Budget: startingBudget(newSettings),
+    p2Budget: startingBudget(newSettings),
     p1TurnData: {},
     p2TurnData: {},
     transientContext: {},

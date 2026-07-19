@@ -17,7 +17,6 @@ export interface LobbySettings {
   objectivesVisible: boolean
   movementMode: MovementMode
   startingMovementPoints: number
-  maxSpendPerTurn: number
 }
 
 /**
@@ -35,6 +34,5 @@ export function resolveMatchSettings(lobby: LobbySettings): MatchSettings {
     objectivesVisible: lobby.objectivesVisible,
     movementMode: lobby.movementMode,
     startingMovementPoints: lobby.startingMovementPoints,
-    maxSpendPerTurn: lobby.maxSpendPerTurn,
   }
 }

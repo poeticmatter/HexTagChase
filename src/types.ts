@@ -34,7 +34,7 @@ export type WinCondition = 'survive_turns' | 'collect_objectives'
 
 /**
  * 'fixed' — classic per-turn budget (baseMovement, resets each turn).
- * 'pool'  — shared match-long resource: players choose how much to spend each
+ * 'pool'  — shared game-long resource: players choose how much to spend each
  *           turn out of a starting pool, and correct predictions add to it permanently.
  */
 export type MovementMode = 'fixed' | 'pool'
@@ -50,8 +50,6 @@ export interface MatchSettings {
   movementMode: MovementMode
   /** Starting size of the movement pool. Only used when movementMode is 'pool'. */
   startingMovementPoints: number
-  /** Max points spendable in a single turn. 0 means unlimited. Only used when movementMode is 'pool'. */
-  maxSpendPerTurn: number
 }
 
 // ── Symmetrical turn plans ─────────────────────────────────────────────────────

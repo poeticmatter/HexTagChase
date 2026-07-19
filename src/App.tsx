@@ -173,7 +173,7 @@ function ActiveGame({
     if (effectiveWaiting || gameState.winner) return new Map()
     const myPos    = isChaser ? gameState.chaserPos : gameState.evaderPos
     const myBudget = playerRole === 1 ? gameState.p1Budget : gameState.p2Budget
-    const budget   = effectiveTurnBudget(gameState.settings, myBudget)
+    const budget   = effectiveTurnBudget(gameState.settings, myBudget, gameState.turn)
     return reachableDestinations(myPos, gameState.elevations, topology.wallKeys, budget, allowStay)
   }, [gameState, topology, effectiveWaiting, isChaser, playerRole, allowStay])
 
@@ -181,7 +181,7 @@ function ActiveGame({
     if (effectiveWaiting || gameState.winner) return new Map()
     const opponentPos    = isChaser ? gameState.evaderPos  : gameState.chaserPos
     const opponentBudget = playerRole === 1 ? gameState.p2Budget : gameState.p1Budget
-    const budget         = effectiveTurnBudget(gameState.settings, opponentBudget)
+    const budget         = effectiveTurnBudget(gameState.settings, opponentBudget, gameState.turn)
     return reachableDestinations(opponentPos, gameState.elevations, topology.wallKeys, budget, allowStay)
   }, [gameState, topology, effectiveWaiting, isChaser, allowStay])
 
