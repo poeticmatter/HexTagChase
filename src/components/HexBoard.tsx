@@ -810,7 +810,7 @@ export function HexBoard({
             fontSize={21} fontWeight="700"
             fill={winner === 'chaser' ? '#fca5a5' : '#93c5fd'}
           >
-            {winner === 'chaser' ? 'Tagged!' : 'Evader survives!'}
+            {winner === 'chaser' ? 'Chaser wins!' : 'Evader wins!'}
           </text>
         </g>
       )}

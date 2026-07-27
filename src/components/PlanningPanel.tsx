@@ -124,7 +124,6 @@ function buildSteps(
 interface Props {
   isChaser: boolean
   turn: number
-  maxTurns: number
   draft: DraftPlan
   schema: TurnSchema
   currentStep: UIStep | 'ready'
@@ -132,18 +131,12 @@ interface Props {
   waitingForPartner: boolean
   onConfirm: (plan: TurnPlan) => void
   onReset: () => void
-  /** Movement pool mode — when 'pool', shows the remaining pool and a "stay put" option. */
-  movementMode?: MovementMode
-  /** Remaining movement points, meaningful only when movementMode is 'pool'. */
   movementPool?: number
-  /** Selects the player's current hex (0-cost move) as this turn's destination. */
-  onStay?: () => void
 }
 
 export function PlanningPanel({
   isChaser,
   turn,
-  maxTurns,
   draft,
   schema,
   currentStep,
@@ -151,16 +144,14 @@ export function PlanningPanel({
   waitingForPartner,
   onConfirm,
   onReset,
-  movementMode,
   movementPool,
-  onStay,
 }: Props) {
   const steps = buildSteps(draft, schema, currentStep)
   const role = isChaser ? 'Chaser' : 'Evader'
   const roleColor = isChaser ? 'text-red-400' : 'text-blue-400'
   const goal = isChaser
-    ? 'Tag the evader (end adjacent)'
-    : `Survive ${maxTurns} turns`
+    ? 'Tag the evader or drain their pool'
+    : 'Collect goals (+2 pts) & outlast chaser'
 
   const isComplete = isDraftComplete(draft, schema)
 
@@ -181,17 +172,11 @@ export function PlanningPanel({
         <span className="text-xs text-neutral-500">{goal}</span>
       </div>
 
-      {/* Movement pool + escalating turn limit (pool mode only) */}
-      {movementMode === 'pool' && (
-        <div className="flex flex-col gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800/40 px-3 py-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Movement pool</span>
-            <span className="text-sm font-mono text-neutral-200">{movementPool}</span>
-          </div>
-          <div className="flex items-center justify-between border-t border-neutral-700/50 pt-1.5">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Turn limit (Max spend)</span>
-            <span className="text-sm font-mono text-neutral-200">{turn} pts</span>
-          </div>
+      {/* Movement pool display */}
+      {movementPool !== undefined && (
+        <div className="flex items-center justify-between rounded-lg border border-neutral-700 bg-neutral-800/40 px-3 py-2">
+          <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Movement Pool</span>
+          <span className="text-sm font-mono text-neutral-200">{movementPool} pts</span>
         </div>
       )}
 
@@ -210,14 +195,6 @@ export function PlanningPanel({
             <StepIndicator label={s.label} done={s.done} active={s.active} />
           </div>
         ))}
-        {onStay && currentStep === 'select_movement' && (
-          <button
-            onClick={onStay}
-            className="mt-1 py-1.5 bg-neutral-700 hover:bg-neutral-600 active:bg-neutral-800 rounded-lg text-xs font-semibold text-neutral-300 transition-colors"
-          >
-            Stay put (0 pts)
-          </button>
-        )}
       </div>
 
       <div className="flex gap-2">

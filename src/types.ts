@@ -30,25 +30,10 @@ export interface MapDefinition {
   rules?: MapRule[]
 }
 
-export type WinCondition = 'survive_turns' | 'collect_objectives'
-
-/**
- * 'fixed' — classic per-turn budget (baseMovement, resets each turn).
- * 'pool'  — shared game-long resource: players choose how much to spend each
- *           turn out of a starting pool, and correct predictions add to it permanently.
- */
-export type MovementMode = 'fixed' | 'pool'
-
 export interface MatchSettings {
-  maxTurns: number
   chaserPlayer: 1 | 2
-  baseMovement: 1 | 2
   mapId: string
-  winCondition: WinCondition
-  objectivesTarget: number
-  objectivesVisible: boolean
-  movementMode: MovementMode
-  /** Starting size of the movement pool. Only used when movementMode is 'pool'. */
+  /** Starting size of the evader's movement pool. Chaser gets startingMovementPoints + 5. */
   startingMovementPoints: number
 }
 
