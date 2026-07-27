@@ -201,62 +201,78 @@ function ActiveGame({
   const prevMyPath       = isChaser ? gameState.prevChaserPath : gameState.prevEvaderPath
   const prevOpponentPath = isChaser ? gameState.prevEvaderPath : gameState.prevChaserPath
 
+  const chaserBudget = gameState.settings.chaserPlayer === 1 ? gameState.p1Budget : gameState.p2Budget
+  const evaderBudget = gameState.settings.chaserPlayer === 1 ? gameState.p2Budget : gameState.p1Budget
+
   return (
-    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 p-4 font-sans">
-      {/* Header */}
-      <div className="flex items-center gap-4 flex-wrap justify-center">
-        <h1 className="text-2xl font-bold tracking-tight">Hex Tag</h1>
-        <span className="text-neutral-400 text-sm">
-          Turn {gameState.turn}
-        </span>
-        <span className="text-amber-400 text-sm font-semibold">
-          {gameState.objectivesCollected} objectives collected
-        </span>
-        <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
+    <div className="w-full min-h-screen bg-neutral-900 flex flex-col items-center justify-start text-white gap-3 p-4 font-sans">
+      {/* Standalone Title Banner */}
+      <h1 className="text-3xl font-black tracking-widest bg-gradient-to-r from-red-500 via-amber-400 to-blue-500 bg-clip-text text-transparent drop-shadow-lg uppercase text-center mt-2">
+        HEX TAG CHASE
+      </h1>
+
+      {/* Cohesive Scoreboard HUD - Left Chaser (Red) | Right Evader (Blue) */}
+      <div className="grid grid-cols-2 gap-4 w-full max-w-md px-2">
+        {/* Left: Chaser Pool */}
+        <div className={`flex flex-col items-center justify-center py-2 px-4 rounded-xl border transition-all ${
           isChaser
-            ? 'bg-red-900/50 text-red-400 border-red-800'
-            : 'bg-blue-900/50 text-blue-400 border-blue-800'
+            ? 'bg-red-950/60 border-red-500/80 shadow-lg shadow-red-950/50 ring-1 ring-red-500/40'
+            : 'bg-neutral-800/70 border-red-900/30 opacity-80'
         }`}>
-          {isChaser ? 'Chaser' : 'Evader'}
-        </span>
-        <button
-          onClick={() => setShowCoords(v => !v)}
-          className={`text-xs px-2 py-1 rounded border transition-colors ${
-            showCoords
-              ? 'bg-neutral-700 text-neutral-200 border-neutral-600'
-              : 'bg-neutral-900 text-neutral-600 border-neutral-800 hover:text-neutral-400'
-          }`}
-        >
-          coords
-        </button>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-red-400 flex items-center gap-1.5">
+            Chaser Pool
+            {isChaser && <span className="text-[9px] font-bold text-red-200 bg-red-800 px-1.5 py-0.5 rounded-full">(YOU)</span>}
+          </span>
+          <span className="text-3xl font-mono font-black text-red-400 tracking-tight">
+            {chaserBudget}
+          </span>
+        </div>
+
+        {/* Right: Evader Pool */}
+        <div className={`flex flex-col items-center justify-center py-2 px-4 rounded-xl border transition-all ${
+          !isChaser
+            ? 'bg-blue-950/60 border-blue-500/80 shadow-lg shadow-blue-950/50 ring-1 ring-blue-500/40'
+            : 'bg-neutral-800/70 border-blue-900/30 opacity-80'
+        }`}>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+            Evader Pool
+            {!isChaser && <span className="text-[9px] font-bold text-blue-200 bg-blue-800 px-1.5 py-0.5 rounded-full">(YOU)</span>}
+          </span>
+          <span className="text-3xl font-mono font-black text-blue-400 tracking-tight">
+            {evaderBudget}
+          </span>
+        </div>
       </div>
 
       {objectiveFlash && (
-        <div className="px-4 py-2 bg-amber-900/70 border border-amber-600 rounded-lg text-amber-300 text-sm font-semibold animate-pulse">
+        <div className="px-4 py-1.5 bg-amber-900/80 border border-amber-600/80 rounded-lg text-amber-300 text-xs font-semibold animate-pulse shadow-md">
           Objective collected! (+2 movement pool)
         </div>
       )}
 
-      <HexBoard
-        myPos={myPos}
-        opponentPos={opponentPos}
-        prevMyPath={prevMyPath}
-        prevOpponentPath={prevOpponentPath}
-        committedMyPath={null}
-        committedOpponentPath={null}
-        isChaser={isChaser}
-        elevations={gameState.elevations}
-        walls={gameState.walls}
-        showCoords={showCoords}
-        currentStep={currentStep}
-        draft={draft}
-        waitingForPartner={effectiveWaiting}
-        winner={gameState.winner}
-        validTargets={validTargets}
-        onHexClick={handleHexClick}
-        objectives={gameState.objectives}
-        showObjectives={true}
-      />
+      {/* Board Container */}
+      <div className="relative rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl">
+        <HexBoard
+          myPos={myPos}
+          opponentPos={opponentPos}
+          prevMyPath={prevMyPath}
+          prevOpponentPath={prevOpponentPath}
+          committedMyPath={null}
+          committedOpponentPath={null}
+          isChaser={isChaser}
+          elevations={gameState.elevations}
+          walls={gameState.walls}
+          showCoords={showCoords}
+          currentStep={currentStep}
+          draft={draft}
+          waitingForPartner={effectiveWaiting}
+          winner={gameState.winner}
+          validTargets={validTargets}
+          onHexClick={handleHexClick}
+          objectives={gameState.objectives}
+          showObjectives={true}
+        />
+      </div>
 
       {gameState.matchState.matchWinner ? (
         <div className="flex flex-col items-center gap-4">
@@ -287,7 +303,7 @@ function ActiveGame({
           )}
         </div>
       ) : (
-        <div className="w-full max-w-sm" key={gameState.turn}>
+        <div className="w-full max-w-sm flex flex-col items-center gap-3" key={gameState.turn}>
           <PlanningPanel
             isChaser={isChaser}
             turn={gameState.turn}
@@ -298,8 +314,23 @@ function ActiveGame({
             waitingForPartner={effectiveWaiting}
             onConfirm={handleConfirm}
             onReset={handleReset}
-            movementPool={playerRole === 1 ? gameState.p1Budget : gameState.p2Budget}
           />
+
+          {/* Small Coords button with grid icon at bottom */}
+          <button
+            onClick={() => setShowCoords(v => !v)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1 rounded-full border transition-all ${
+              showCoords
+                ? 'bg-neutral-700 text-neutral-200 border-neutral-500 shadow-sm'
+                : 'bg-neutral-800/80 text-neutral-400 border-neutral-700 hover:text-neutral-200 hover:border-neutral-600'
+            }`}
+            title="Toggle grid coordinates"
+          >
+            <svg className="w-3.5 h-3.5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16M6 4v16M12 4v16M18 4v16" />
+            </svg>
+            <span className="font-medium">Coords</span>
+          </button>
         </div>
       )}
     </div>
