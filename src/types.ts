@@ -57,6 +57,17 @@ export interface EvaderPlan {
 
 export type TurnPlan = ChaserPlan | EvaderPlan
 
+export interface DraftPlan {
+  moveDest: HexCoord | null
+  movePath: HexCoord[] | null
+  predictDest: HexCoord | null
+}
+
+export interface SpectatorDrafts {
+  chaserDraft: DraftPlan | null
+  evaderDraft: DraftPlan | null
+}
+
 // ── State machine & UI ────────────────────────────────────────────────────────
 
 export type UIStep =
@@ -111,11 +122,14 @@ export interface GameState {
   lastCollectedObjective: HexCoord | null
 }
 
+export type UserRole = 1 | 2 | 'spectator'
+
 export type ConnectionStatus =
   | 'connecting'
   | 'waiting_for_partner'
   | 'waiting_for_level'
   | 'playing'
+  | 'spectating'
   | 'reconnecting'
   | 'disconnected'
   | 'error'

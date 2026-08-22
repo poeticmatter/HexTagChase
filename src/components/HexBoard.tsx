@@ -278,6 +278,9 @@ interface Props {
   onWallToggle?: (w: WallCoord) => void
   objectives?: HexCoord[]
   showObjectives?: boolean
+  chaserDraft?: DraftPlan | null
+  evaderDraft?: DraftPlan | null
+  isSpectator?: boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -292,6 +295,7 @@ export function HexBoard({
   isOrthographic = false, editorMode = false, suppressValidHighlight = false, onWallToggle,
   heatmapData, heatmapColor = '#ef4444',
   objectives = [], showObjectives = true,
+  chaserDraft = null, evaderDraft = null, isSpectator = false,
 }: Props) {
   const isoY = isOrthographic ? 1.0 : 0.55
   const { width, height, offsetX, offsetY } = boardDimensions(isoY)
@@ -425,12 +429,30 @@ export function HexBoard({
   if (prevMyPath)            enqueuePathSegments(prevMyPath,            myColor,       0.30, 'arrow-last-my',    'pm')
   if (prevOpponentPath)      enqueuePathSegments(prevOpponentPath,      opponentColor, 0.30, 'arrow-last-opp',   'po')
 
-  if (draft.movePath && draft.movePath.length > 0) {
-    enqueuePathSegments([myPos, ...draft.movePath], myColor, 0.85, 'arrow-move', 'draft-move')
-  }
+  const chaserPos = isChaser ? myPos : opponentPos
+  const evaderPos = isChaser ? opponentPos : myPos
 
-  if (draft.predictDest)
-    enqueueSingleArrow(opponentPos, draft.predictDest, '#a855f7', 0.65, 'arrow-pred', '5 3', 'draft-pred')
+  if (isSpectator) {
+    if (chaserDraft?.movePath && chaserDraft.movePath.length > 0) {
+      enqueuePathSegments([chaserPos, ...chaserDraft.movePath], '#ef4444', 0.85, 'arrow-chaser-move', 'chaser-draft-move')
+    }
+    if (chaserDraft?.predictDest) {
+      enqueueSingleArrow(evaderPos, chaserDraft.predictDest, '#f87171', 0.75, 'arrow-chaser-pred', '5 3', 'chaser-draft-pred')
+    }
+    if (evaderDraft?.movePath && evaderDraft.movePath.length > 0) {
+      enqueuePathSegments([evaderPos, ...evaderDraft.movePath], '#3b82f6', 0.85, 'arrow-evader-move', 'evader-draft-move')
+    }
+    if (evaderDraft?.predictDest) {
+      enqueueSingleArrow(chaserPos, evaderDraft.predictDest, '#60a5fa', 0.75, 'arrow-evader-pred', '5 3', 'evader-draft-pred')
+    }
+  } else {
+    if (draft.movePath && draft.movePath.length > 0) {
+      enqueuePathSegments([myPos, ...draft.movePath], myColor, 0.85, 'arrow-move', 'draft-move')
+    }
+
+    if (draft.predictDest)
+      enqueueSingleArrow(opponentPos, draft.predictDest, '#a855f7', 0.65, 'arrow-pred', '5 3', 'draft-pred')
+  }
 
   renderQueue.sort((a, b) => a.depth - b.depth)
 
@@ -445,13 +467,25 @@ export function HexBoard({
     const isMovePick  = !!(draft.moveDest    && hexKey(draft.moveDest)    === coordKey)
     const isPredPick  = !!(draft.predictDest && hexKey(draft.predictDest) === coordKey)
 
+    const isChaserMovePick = !!(chaserDraft?.moveDest    && hexKey(chaserDraft.moveDest)    === coordKey)
+    const isChaserPredPick = !!(chaserDraft?.predictDest && hexKey(chaserDraft.predictDest) === coordKey)
+    const isEvaderMovePick = !!(evaderDraft?.moveDest    && hexKey(evaderDraft.moveDest)    === coordKey)
+    const isEvaderPredPick = !!(evaderDraft?.predictDest && hexKey(evaderDraft.predictDest) === coordKey)
+
     const elev = tileVisualElevation(q, r, baseLevel, isOrthographic)
 
     let topColor = tileTopColor(q, r, baseLevel)
     if (!suppressValidHighlight && baseLevel !== -1) {
-      if (isValid)                   topColor = '#5d9ab5'
-      if (isMovePick)                topColor = '#3d9e6a'
-      if (isPredPick)                topColor = '#8b5cc4'
+      if (isSpectator) {
+        if (isChaserMovePick) topColor = '#dc2626'
+        else if (isEvaderMovePick) topColor = '#2563eb'
+        else if (isChaserPredPick) topColor = '#b91c1c'
+        else if (isEvaderPredPick) topColor = '#1d4ed8'
+      } else {
+        if (isValid)                   topColor = '#5d9ab5'
+        if (isMovePick)                topColor = '#3d9e6a'
+        if (isPredPick)                topColor = '#8b5cc4'
+      }
     }
 
     let sideR = darken(topColor, 0.68)
@@ -679,6 +713,10 @@ export function HexBoard({
           ['arrow-last-opp',     opponentColor, 0.5],
           ['arrow-commit-my',    myColor,       1.0],
           ['arrow-commit-opp',   opponentColor, 1.0],
+          ['arrow-chaser-move',  '#ef4444',     1.0],
+          ['arrow-chaser-pred',  '#f87171',     0.85],
+          ['arrow-evader-move',  '#3b82f6',     1.0],
+          ['arrow-evader-pred',  '#60a5fa',     0.85],
         ] as [string, string, number][]).map(([id, fill, op]) => (
           <marker key={id} id={id} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
             <path d="M 0 0 L 6 3 L 0 6 Z" fill={fill} fillOpacity={op} />

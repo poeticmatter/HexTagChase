@@ -1,10 +1,5 @@
-import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, MovementMode } from '../types'
-
-export interface DraftPlan {
-  moveDest: HexCoord | null
-  movePath: HexCoord[] | null
-  predictDest: HexCoord | null
-}
+import type { HexCoord, TurnPlan, ResolutionSummary, TurnSchema, UIStep, DraftPlan } from '../types'
+export type { DraftPlan }
 
 function isDraftComplete(draft: DraftPlan, schema: TurnSchema): boolean {
   for (const step of schema.requiredSteps) {

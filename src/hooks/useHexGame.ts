@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer, { DataConnection } from 'peerjs'
-import type { GameState, TurnPlan, ConnectionStatus, MatchSettings } from '../types'
+import type { GameState, TurnPlan, ConnectionStatus, MatchSettings, UserRole, DraftPlan, SpectatorDrafts } from '../types'
 import { processPhase, buildNextRoundState, buildInitialState } from '../lib/hexGameLogic'
 
 // ── Reconnection policy ───────────────────────────────────────────────────────
@@ -10,16 +10,6 @@ const MAX_RECONNECT_ATTEMPTS = 5
 
 // ── ICE server config ─────────────────────────────────────────────────────────
 
-/**
- * RTCConfiguration passed to every Peer instance.
- *
- * Google's public STUN servers handle most cases. If players are behind
- * symmetric NAT a TURN relay is required — add credentials here:
- *
- *   { urls: 'turn:your-turn-server.com', username: '…', credential: '…' }
- *
- * Free TURN options: Metered.ca (free tier), Cloudflare (paid), self-hosted coturn.
- */
 const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -28,23 +18,17 @@ const ICE_CONFIG: RTCConfiguration = {
   ],
 }
 
-/**
- * Base delay multiplier in ms. Actual delay = attempt * BASE.
- * Attempt 1 → 1.5 s, 2 → 3 s, …, 5 → 7.5 s.
- */
 const RECONNECT_BASE_DELAY_MS = 1500
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
 type PeerMessage =
-  | { type: 'GAME_STATE'; state: GameState }
+  | { type: 'GAME_STATE'; state: GameState; spectatorCount?: number }
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
-  /**
-   * Sent by a reconnecting client to request the host's authoritative state.
-   * lastTurn is the client's last known sequence position, used
-   * by the host to detect stale injection attempts.
-   */
   | { type: 'REQUEST_STATE'; lastTurn: number }
+  | { type: 'ASSIGNED_ROLE'; role: UserRole; spectatorCount: number }
+  | { type: 'SPECTATOR_COUNT'; spectatorCount: number }
+  | { type: 'DRAFT_UPDATE'; playerRole: 1 | 2; draft: DraftPlan | null }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
@@ -53,23 +37,53 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [waitingForPartner, setWaitingForPartner] = useState(false)
+  const [assignedRole, setAssignedRole] = useState<UserRole>(playerRole === 1 ? 1 : 2)
+  const [spectatorCount, setSpectatorCount] = useState<number>(0)
+  const [spectatorDrafts, setSpectatorDrafts] = useState<SpectatorDrafts>({
+    chaserDraft: null,
+    evaderDraft: null,
+  })
 
   const live = useRef({
     state: null as GameState | null,
-    conn: null as DataConnection | null,
+    player2Conn: null as DataConnection | null,
+    spectatorConns: new Set<DataConnection>(),
+    clientConn: null as DataConnection | null, // client side handle to host
     hostPendingPlan: null as TurnPlan | null,
     clientPendingPlan: null as TurnPlan | null,
+    hostDraft: null as DraftPlan | null,
+    clientDraft: null as DraftPlan | null,
   })
 
-  // Tracks how many reconnect attempts the client has made in the current session.
   const reconnectAttempts = useRef(0)
-
-  // Holds the active Peer instance for both roles so the cleanup path is unified.
   const activePeer = useRef<Peer | null>(null)
 
   const syncState = useCallback((next: GameState) => {
     live.current.state = next
     setGameState(next)
+  }, [])
+
+  const broadcastToAll = useCallback((msg: PeerMessage) => {
+    if (live.current.player2Conn?.open) {
+      live.current.player2Conn.send(msg)
+    }
+    live.current.spectatorConns.forEach((sConn) => {
+      if (sConn.open) {
+        sConn.send(msg)
+      }
+    })
+  }, [])
+
+  const updateSpectatorDraftState = useCallback((pRole: 1 | 2, draft: DraftPlan | null, state: GameState | null) => {
+    if (!state) return
+    const isChaser = state.settings.chaserPlayer === pRole
+    setSpectatorDrafts(prev => {
+      if (isChaser) {
+        return { ...prev, chaserDraft: draft }
+      } else {
+        return { ...prev, evaderDraft: draft }
+      }
+    })
   }, [])
 
   const checkExecutionTrigger = useCallback(() => {
@@ -94,26 +108,27 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
       live.current.hostPendingPlan = null
       live.current.clientPendingPlan = null
+      live.current.hostDraft = null
+      live.current.clientDraft = null
       setWaitingForPartner(false)
+      setSpectatorDrafts({ chaserDraft: null, evaderDraft: null })
 
       syncState(nextState)
-      live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
+      broadcastToAll({
+        type: 'GAME_STATE',
+        state: nextState,
+        spectatorCount: live.current.spectatorConns.size,
+      })
+      broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 1, draft: null })
+      broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 2, draft: null })
     }
-  }, [syncState])
+  }, [syncState, broadcastToAll])
 
   useEffect(() => {
-    // Shared cleanup handle — ensures any pending reconnect timer is cancelled
-    // if the component unmounts while the client is in the reconnecting state.
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     if (playerRole === 1) {
       // ── Host path ─────────────────────────────────────────────────────────
-      //
-      // The host peer lives for the full session. When the client drops, we
-      // null out the connection handle and wait — the same peer ID remains
-      // claimed on the PeerJS broker, so the client can reconnect using the
-      // same room code without any host-side teardown.
-
       if (!settings) return
 
       const peer = new Peer(`hex-tag-${roomCode}`, { config: ICE_CONFIG })
@@ -123,12 +138,51 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       peer.on('open', () => setStatus('waiting_for_partner'))
 
       peer.on('connection', (conn: DataConnection) => {
-        live.current.conn = conn
-
         conn.on('open', () => {
           const state = live.current.state
-          if (state) conn.send({ type: 'GAME_STATE', state } as PeerMessage)
-          setStatus('playing')
+          const player2Active = live.current.player2Conn !== null && live.current.player2Conn.open
+
+          if (!player2Active) {
+            live.current.player2Conn = conn
+            conn.send({
+              type: 'ASSIGNED_ROLE',
+              role: 2,
+              spectatorCount: live.current.spectatorConns.size,
+            } as PeerMessage)
+            if (state) {
+              conn.send({
+                type: 'GAME_STATE',
+                state,
+                spectatorCount: live.current.spectatorConns.size,
+              } as PeerMessage)
+            }
+            setStatus('playing')
+          } else {
+            live.current.spectatorConns.add(conn)
+            setSpectatorCount(live.current.spectatorConns.size)
+            conn.send({
+              type: 'ASSIGNED_ROLE',
+              role: 'spectator',
+              spectatorCount: live.current.spectatorConns.size,
+            } as PeerMessage)
+            if (state) {
+              conn.send({
+                type: 'GAME_STATE',
+                state,
+                spectatorCount: live.current.spectatorConns.size,
+              } as PeerMessage)
+              if (live.current.hostDraft) {
+                conn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft: live.current.hostDraft } as PeerMessage)
+              }
+              if (live.current.clientDraft) {
+                conn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: live.current.clientDraft } as PeerMessage)
+              }
+            }
+            broadcastToAll({
+              type: 'SPECTATOR_COUNT',
+              spectatorCount: live.current.spectatorConns.size,
+            })
+          }
         })
 
         conn.on('data', (raw: unknown) => {
@@ -137,12 +191,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
           if (!current) return
 
           if (msg.type === 'REQUEST_STATE') {
-            // ── Sequence guard ─────────────────────────────────────────────
-            // Reject the handshake if the client claims to be ahead of the
-            // host. The only way this could occur is a stale or malformed
-            // packet — sending the host state back would roll back progress.
-            const clientIsAhead =
-              msg.lastTurn > current.turn
+            const clientIsAhead = msg.lastTurn > current.turn
 
             if (clientIsAhead) {
               console.warn(
@@ -151,19 +200,34 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
               return
             }
 
-            // Discard any pending plan from the old connection. If this plan
-            // were retained, it could replay into the next checkExecutionTrigger
-            // call and resolve a turn without the client's conscious re-submission.
-            live.current.clientPendingPlan = null
-            setWaitingForPartner(false)
+            if (conn === live.current.player2Conn) {
+              live.current.clientPendingPlan = null
+              setWaitingForPartner(false)
+            }
 
-            conn.send({ type: 'GAME_STATE', state: current } as PeerMessage)
+            conn.send({
+              type: 'GAME_STATE',
+              state: current,
+              spectatorCount: live.current.spectatorConns.size,
+            } as PeerMessage)
+            return
+          }
+
+          if (msg.type === 'DRAFT_UPDATE') {
+            if (conn === live.current.player2Conn) {
+              live.current.clientDraft = msg.draft
+              // Forward draft update from Player 2 to all spectators
+              live.current.spectatorConns.forEach((sConn) => {
+                if (sConn.open) {
+                  sConn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: msg.draft } as PeerMessage)
+                }
+              })
+            }
             return
           }
 
           if (msg.type !== 'SUBMIT_PLAN') return
-
-          // Implicit ACK: discard stale packets from a previous turn.
+          if (conn !== live.current.player2Conn) return
           if (msg.plan.turn !== current.turn) return
 
           live.current.clientPendingPlan = msg.plan
@@ -171,11 +235,29 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
         })
 
         conn.on('close', () => {
-          // Client dropped. Keep the host peer alive — the client will reconnect.
-          live.current.conn = null
+          if (live.current.player2Conn === conn) {
+            live.current.player2Conn = null
+          } else if (live.current.spectatorConns.has(conn)) {
+            live.current.spectatorConns.delete(conn)
+            setSpectatorCount(live.current.spectatorConns.size)
+            broadcastToAll({
+              type: 'SPECTATOR_COUNT',
+              spectatorCount: live.current.spectatorConns.size,
+            })
+          }
         })
+
         conn.on('error', () => {
-          live.current.conn = null
+          if (live.current.player2Conn === conn) {
+            live.current.player2Conn = null
+          } else if (live.current.spectatorConns.has(conn)) {
+            live.current.spectatorConns.delete(conn)
+            setSpectatorCount(live.current.spectatorConns.size)
+            broadcastToAll({
+              type: 'SPECTATOR_COUNT',
+              spectatorCount: live.current.spectatorConns.size,
+            })
+          }
         })
       })
 
@@ -189,18 +271,14 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       })
 
       return () => {
-        live.current.conn?.close()
+        live.current.player2Conn?.close()
+        live.current.spectatorConns.forEach((sConn) => sConn.close())
         peer.destroy()
         activePeer.current = null
       }
     } else {
       // ── Client path ───────────────────────────────────────────────────────
-      //
-      // Function declarations are hoisted within this closure, allowing the
-      // mutual reference between scheduleReconnect → attemptConnection.
-
       function scheduleReconnect() {
-        // Idempotency guard: if a timer is already pending do not queue another.
         if (reconnectTimer !== null) return
 
         if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
@@ -211,7 +289,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
         reconnectAttempts.current++
         setStatus('reconnecting')
 
-        // Tear down the failed peer before creating a fresh one.
         activePeer.current?.destroy()
         activePeer.current = null
 
@@ -229,7 +306,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
         clientPeer.on('open', () => {
           const conn = clientPeer.connect(`hex-tag-${roomCode}`, { reliable: true })
-          live.current.conn = conn
+          live.current.clientConn = conn
 
           if (!isReconnecting) {
             setStatus('waiting_for_level')
@@ -237,8 +314,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
           conn.on('open', () => {
             if (isReconnecting) {
-              // Handshake: send our last known sequence position so the host
-              // can validate and respond with the authoritative current state.
               const lastState = live.current.state
               conn.send({
                 type: 'REQUEST_STATE',
@@ -249,11 +324,32 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
           conn.on('data', (raw: unknown) => {
             const msg = raw as PeerMessage
-            if (msg.type === 'GAME_STATE') {
+            if (msg.type === 'ASSIGNED_ROLE') {
+              setAssignedRole(msg.role)
+              setSpectatorCount(msg.spectatorCount)
+              if (msg.role === 'spectator') {
+                setStatus('spectating')
+              } else {
+                setStatus('playing')
+              }
+            } else if (msg.type === 'SPECTATOR_COUNT') {
+              setSpectatorCount(msg.spectatorCount)
+            } else if (msg.type === 'DRAFT_UPDATE') {
+              updateSpectatorDraftState(msg.playerRole, msg.draft, live.current.state)
+            } else if (msg.type === 'GAME_STATE') {
               syncState(msg.state)
               setWaitingForPartner(false)
-              setStatus('playing')
-              // Reset the counter — we have a clean connection again.
+              if (msg.spectatorCount !== undefined) {
+                setSpectatorCount(msg.spectatorCount)
+              }
+              setAssignedRole(prevRole => {
+                if (prevRole === 'spectator') {
+                  setStatus('spectating')
+                } else {
+                  setStatus('playing')
+                }
+                return prevRole
+              })
               reconnectAttempts.current = 0
             }
           })
@@ -265,7 +361,6 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
         clientPeer.on('error', (err: Error & { type: string }) => {
           if (err.type === 'peer-unavailable') {
             if (isReconnecting) {
-              // The host's peer ID may not be re-advertised yet — retry.
               scheduleReconnect()
             } else {
               setErrorMsg('Room not found. Check the room code.')
@@ -282,14 +377,32 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
       return () => {
         if (reconnectTimer !== null) clearTimeout(reconnectTimer)
-        live.current.conn?.close()
+        live.current.clientConn?.close()
         activePeer.current?.destroy()
         activePeer.current = null
       }
     }
-  }, [roomCode, playerRole, settings, syncState, checkExecutionTrigger])
+  }, [roomCode, playerRole, settings, syncState, checkExecutionTrigger, broadcastToAll, updateSpectatorDraftState])
+
+  const sendDraftUpdate = useCallback((draft: DraftPlan) => {
+    if (assignedRole === 'spectator') return
+
+    if (playerRole === 1) {
+      live.current.hostDraft = draft
+      // Broadcast Host's draft to all spectators
+      live.current.spectatorConns.forEach((sConn) => {
+        if (sConn.open) {
+          sConn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft } as PeerMessage)
+        }
+      })
+    } else {
+      live.current.clientConn?.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft } as PeerMessage)
+    }
+  }, [assignedRole, playerRole])
 
   const submitPlan = useCallback((plan: TurnPlan) => {
+    if (assignedRole === 'spectator') return
+
     if (playerRole === 1) {
       const current = live.current.state
       if (!current) return
@@ -298,10 +411,10 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       setWaitingForPartner(true)
       checkExecutionTrigger()
     } else {
-      live.current.conn?.send({ type: 'SUBMIT_PLAN', plan } as PeerMessage)
+      live.current.clientConn?.send({ type: 'SUBMIT_PLAN', plan } as PeerMessage)
       setWaitingForPartner(true)
     }
-  }, [playerRole, checkExecutionTrigger])
+  }, [assignedRole, playerRole, checkExecutionTrigger])
 
   const startNextRound = useCallback(() => {
     if (playerRole !== 1) return
@@ -309,9 +422,30 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     if (!current) return
 
     const nextState = buildNextRoundState(current)
-    syncState(nextState)
-    live.current.conn?.send({ type: 'GAME_STATE', state: nextState } as PeerMessage)
-  }, [playerRole, syncState])
+    live.current.hostDraft = null
+    live.current.clientDraft = null
+    setSpectatorDrafts({ chaserDraft: null, evaderDraft: null })
 
-  return { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound }
+    syncState(nextState)
+    broadcastToAll({
+      type: 'GAME_STATE',
+      state: nextState,
+      spectatorCount: live.current.spectatorConns.size,
+    })
+    broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 1, draft: null })
+    broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 2, draft: null })
+  }, [playerRole, syncState, broadcastToAll])
+
+  return {
+    gameState,
+    status,
+    errorMsg,
+    waitingForPartner,
+    submitPlan,
+    startNextRound,
+    assignedRole,
+    spectatorCount,
+    spectatorDrafts,
+    sendDraftUpdate,
+  }
 }

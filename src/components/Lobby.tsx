@@ -120,7 +120,7 @@ export function Lobby({ onCreateGame }: Props) {
           <p className="text-xs text-neutral-500 leading-relaxed">
             {form.transport === 'async'
               ? 'Take turns at any time — state is saved online. Best for different time zones.'
-              : 'Both players connect at the same time over a direct peer-to-peer link.'}
+              : 'Both players connect at the same time over a direct peer-to-peer link. Additional joiners watch as spectators.'}
           </p>
         </div>
 
