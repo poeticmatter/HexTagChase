@@ -19,7 +19,7 @@ function generateRoomCode(): string {
 
 function StatusScreen({ message }: { message: string }) {
   return (
-    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4">
+    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-4 font-sans">
       <p className="text-neutral-400 text-lg">{message}</p>
       <button
         onClick={() => { window.location.href = window.location.pathname }}
@@ -33,7 +33,7 @@ function StatusScreen({ message }: { message: string }) {
 
 function ReconnectingScreen() {
   return (
-    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-3">
+    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-3 font-sans">
       <p className="text-neutral-200 text-lg font-semibold">Connection lost</p>
       <p className="text-neutral-500 text-sm animate-pulse">Attempting to restore your session…</p>
     </div>
@@ -52,7 +52,7 @@ function WaitingForPartner({
   const base = `${window.location.origin}${window.location.pathname}?room=${roomCode}`
   const shareUrl = transport === 'async' ? `${base}&mode=async` : base
   return (
-    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-6">
+    <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white gap-6 font-sans">
       <h2 className="text-2xl font-semibold">Waiting for {opponentRole}…</h2>
       <p className="text-neutral-400 text-sm">Share this link with your opponent:</p>
       <div className="flex gap-2 items-center">
@@ -460,11 +460,25 @@ function GameView({
   settings,
 }: {
   roomCode: string
-  playerRole: 1 | 2
+  playerRole: UserRole
   settings: MatchSettings | null
 }) {
-  const { gameState, status, errorMsg, waitingForPartner, submitPlan, startNextRound, assignedRole, spectatorCount, spectatorDrafts, sendDraftUpdate } =
-    useHexGame(roomCode, playerRole, settings)
+  const {
+    gameState,
+    status,
+    errorMsg,
+    waitingForPartner,
+    submitPlan,
+    startNextRound,
+    assignedRole,
+    spectatorCount,
+    spectatorDrafts,
+    sendDraftUpdate,
+    availablePlayerSlots,
+    requestRole,
+  } = useHexGame(roomCode, playerRole, settings)
+
+  const [preferredRole, setPreferredRole] = useState<'player' | 'spectator' | null>(null)
 
   if (status === 'connecting')          return <StatusScreen message="Connecting…" />
   if (status === 'error')               return <StatusScreen message={errorMsg ?? 'Connection error.'} />
@@ -472,10 +486,46 @@ function GameView({
   if (status === 'reconnecting')        return <ReconnectingScreen />
   if (status === 'waiting_for_level')   return <StatusScreen message="Joining game…" />
   if (status === 'waiting_for_partner') {
-    const isChaser = gameState?.settings.chaserPlayer === playerRole
-    const opponentRole = isChaser ? 'Evader' : 'Chaser'
+    const isChaser = gameState?.settings.chaserPlayer === 1
+    const opponentRole = playerRole === 'spectator' ? 'Players' : (isChaser ? 'Evader' : 'Chaser')
     return <WaitingForPartner roomCode={roomCode} opponentRole={opponentRole} transport="live" />
   }
+
+  // Join Role Prompt Modal if joining an open room and slot is available
+  if (settings === null && availablePlayerSlots && preferredRole === null) {
+    return (
+      <div className="min-h-screen bg-neutral-900 flex flex-col items-center justify-center text-white p-6 font-sans">
+        <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-6 max-w-sm w-full flex flex-col items-center gap-6 shadow-2xl text-center">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-2xl font-bold">Join Room {roomCode}</h2>
+            <p className="text-xs text-neutral-400">A player slot is available in this room.</p>
+          </div>
+
+          <div className="flex flex-col gap-3 w-full">
+            <button
+              onClick={() => {
+                setPreferredRole('player')
+                requestRole('player')
+              }}
+              className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors shadow-md"
+            >
+              🎮 Join as Player
+            </button>
+            <button
+              onClick={() => {
+                setPreferredRole('spectator')
+                requestRole('spectator')
+              }}
+              className="w-full py-3 px-4 bg-purple-900/80 hover:bg-purple-800 border border-purple-600/60 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors shadow-md text-purple-200"
+            >
+              👁️ Watch as Spectator
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (status === 'spectating' || assignedRole === 'spectator') {
     if (!gameState) return <StatusScreen message="Joining live match as spectator…" />
     return (
@@ -485,9 +535,9 @@ function GameView({
         spectatorCount={spectatorCount}
         spectatorDrafts={spectatorDrafts}
         waitingForPartner={false}
-        canStartNextRound={false}
+        canStartNextRound={settings !== null}
         submitPlan={() => {}}
-        startNextRound={() => {}}
+        startNextRound={startNextRound}
       />
     )
   }
@@ -496,12 +546,12 @@ function GameView({
   return (
     <ActiveGame
       gameState={gameState}
-      playerRole={assignedRole === 2 ? 2 : 1}
+      playerRole={assignedRole}
       spectatorCount={spectatorCount}
       spectatorDrafts={spectatorDrafts}
       sendDraftUpdate={sendDraftUpdate}
       waitingForPartner={waitingForPartner}
-      canStartNextRound={playerRole === 1}
+      canStartNextRound={settings !== null}
       submitPlan={submitPlan}
       startNextRound={startNextRound}
     />
@@ -546,14 +596,17 @@ function AsyncGameView({
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 type GameConfig =
-  | { mode: 'pvp'; transport: Transport; code: string; role: 1 | 2; settings: MatchSettings | null }
+  | { mode: 'pvp'; transport: Transport; code: string; role: UserRole; settings: MatchSettings | null }
 
 function roleStorageKey(code: string): string {
   return `hextag-role-${code}`
 }
 
-function persistedRole(code: string): 1 | 2 {
-  return localStorage.getItem(roleStorageKey(code)) === '1' ? 1 : 2
+function persistedRole(code: string): UserRole {
+  const val = localStorage.getItem(roleStorageKey(code))
+  if (val === '1') return 1
+  if (val === 'spectator') return 'spectator'
+  return 2
 }
 
 export default function App() {
@@ -574,12 +627,13 @@ export default function App() {
     url.searchParams.set('room', code)
     if (lobby.transport === 'async') url.searchParams.set('mode', 'async')
     history.replaceState(null, '', url.toString())
-    localStorage.setItem(roleStorageKey(code), '1')
+    const initialRole: UserRole = lobby.hostRole === 'Spectator' ? 'spectator' : 1
+    localStorage.setItem(roleStorageKey(code), initialRole === 1 ? '1' : 'spectator')
     setGameConfig({
       mode: 'pvp',
       transport: lobby.transport,
       code,
-      role: 1,
+      role: initialRole,
       settings: resolveMatchSettings(lobby),
     })
   }, [])
@@ -595,10 +649,11 @@ export default function App() {
   }
 
   if (gameConfig.transport === 'async') {
+    const asyncRole: 1 | 2 = gameConfig.role === 1 ? 1 : 2
     return (
       <AsyncGameView
         roomCode={gameConfig.code}
-        playerRole={gameConfig.role}
+        playerRole={asyncRole}
         settings={gameConfig.settings}
       />
     )

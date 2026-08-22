@@ -7,7 +7,7 @@ export type Transport = 'live' | 'async'
  * Raw user preferences captured by the Lobby form.
  */
 export interface LobbySettings {
-  hostRole: 'Chaser' | 'Evader'
+  hostRole: 'Chaser' | 'Evader' | 'Spectator'
   mapId: string
   transport: Transport
   startingMovementPoints: number
@@ -19,7 +19,7 @@ export interface LobbySettings {
  */
 export function resolveMatchSettings(lobby: LobbySettings): MatchSettings {
   return {
-    chaserPlayer: lobby.hostRole === 'Chaser' ? 1 : 2,
+    chaserPlayer: lobby.hostRole === 'Evader' ? 2 : 1,
     mapId: lobby.mapId,
     startingMovementPoints: lobby.startingMovementPoints,
   }

@@ -26,19 +26,21 @@ type PeerMessage =
   | { type: 'GAME_STATE'; state: GameState; spectatorCount?: number }
   | { type: 'SUBMIT_PLAN'; plan: TurnPlan }
   | { type: 'REQUEST_STATE'; lastTurn: number }
-  | { type: 'ASSIGNED_ROLE'; role: UserRole; spectatorCount: number }
+  | { type: 'REQUEST_ROLE'; preferredRole?: 'player' | 'spectator' }
+  | { type: 'ASSIGNED_ROLE'; role: UserRole; spectatorCount: number; availablePlayerSlots?: boolean }
   | { type: 'SPECTATOR_COUNT'; spectatorCount: number }
   | { type: 'DRAFT_UPDATE'; playerRole: 1 | 2; draft: DraftPlan | null }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchSettings | null) {
+export function useHexGame(roomCode: string, initialRole: UserRole, settings: MatchSettings | null) {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [waitingForPartner, setWaitingForPartner] = useState(false)
-  const [assignedRole, setAssignedRole] = useState<UserRole>(playerRole === 1 ? 1 : 2)
+  const [assignedRole, setAssignedRole] = useState<UserRole>(initialRole)
   const [spectatorCount, setSpectatorCount] = useState<number>(0)
+  const [availablePlayerSlots, setAvailablePlayerSlots] = useState<boolean>(false)
   const [spectatorDrafts, setSpectatorDrafts] = useState<SpectatorDrafts>({
     chaserDraft: null,
     evaderDraft: null,
@@ -46,13 +48,15 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
 
   const live = useRef({
     state: null as GameState | null,
+    player1Conn: null as DataConnection | null,
     player2Conn: null as DataConnection | null,
     spectatorConns: new Set<DataConnection>(),
     clientConn: null as DataConnection | null, // client side handle to host
     hostPendingPlan: null as TurnPlan | null,
-    clientPendingPlan: null as TurnPlan | null,
-    hostDraft: null as DraftPlan | null,
-    clientDraft: null as DraftPlan | null,
+    p1PendingPlan: null as TurnPlan | null,
+    p2PendingPlan: null as TurnPlan | null,
+    p1Draft: null as DraftPlan | null,
+    p2Draft: null as DraftPlan | null,
   })
 
   const reconnectAttempts = useRef(0)
@@ -64,6 +68,9 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
   }, [])
 
   const broadcastToAll = useCallback((msg: PeerMessage) => {
+    if (live.current.player1Conn?.open) {
+      live.current.player1Conn.send(msg)
+    }
     if (live.current.player2Conn?.open) {
       live.current.player2Conn.send(msg)
     }
@@ -91,25 +98,25 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     if (!current) return
 
     const hostIsChaser = current.settings.chaserPlayer === 1
-    const hostSchema = hostIsChaser ? current.turnSchema.chaser : current.turnSchema.evader
-    const clientSchema = hostIsChaser ? current.turnSchema.evader : current.turnSchema.chaser
+    const hostIsPlaying = (initialRole !== 'spectator')
 
-    const hostReady = hostSchema.requiredSteps.length === 0 || live.current.hostPendingPlan !== null
-    const clientReady = clientSchema.requiredSteps.length === 0 || live.current.clientPendingPlan !== null
+    const p1Schema = current.turnSchema[hostIsChaser ? 'chaser' : 'evader']
+    const p2Schema = current.turnSchema[hostIsChaser ? 'evader' : 'chaser']
 
-    if (hostReady && clientReady) {
-      const hostPlan = hostSchema.requiredSteps.length === 0 ? null : live.current.hostPendingPlan
-      const clientPlan = clientSchema.requiredSteps.length === 0 ? null : live.current.clientPendingPlan
+    const p1Ready = p1Schema.requiredSteps.length === 0 || (hostIsPlaying ? live.current.hostPendingPlan !== null : live.current.p1PendingPlan !== null)
+    const p2Ready = p2Schema.requiredSteps.length === 0 || live.current.p2PendingPlan !== null
 
-      const p1Plan = hostIsChaser ? hostPlan : clientPlan
-      const p2Plan = hostIsChaser ? clientPlan : hostPlan
+    if (p1Ready && p2Ready) {
+      const p1Plan = p1Schema.requiredSteps.length === 0 ? null : (hostIsPlaying ? live.current.hostPendingPlan : live.current.p1PendingPlan)
+      const p2Plan = p2Schema.requiredSteps.length === 0 ? null : live.current.p2PendingPlan
 
       const nextState = processPhase(current, p1Plan, p2Plan)
 
       live.current.hostPendingPlan = null
-      live.current.clientPendingPlan = null
-      live.current.hostDraft = null
-      live.current.clientDraft = null
+      live.current.p1PendingPlan = null
+      live.current.p2PendingPlan = null
+      live.current.p1Draft = null
+      live.current.p2Draft = null
       setWaitingForPartner(false)
       setSpectatorDrafts({ chaserDraft: null, evaderDraft: null })
 
@@ -122,73 +129,101 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 1, draft: null })
       broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 2, draft: null })
     }
-  }, [syncState, broadcastToAll])
+  }, [syncState, broadcastToAll, initialRole])
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-    if (playerRole === 1) {
+    if (settings !== null) {
       // ── Host path ─────────────────────────────────────────────────────────
-      if (!settings) return
-
       const peer = new Peer(`hex-tag-${roomCode}`, { config: ICE_CONFIG })
       activePeer.current = peer
       syncState(buildInitialState(settings))
 
-      peer.on('open', () => setStatus('waiting_for_partner'))
+      peer.on('open', () => {
+        if (initialRole === 'spectator') {
+          setStatus('spectating')
+        } else {
+          setStatus('waiting_for_partner')
+        }
+      })
+
+      const assignConnRole = (conn: DataConnection, preferredRole?: 'player' | 'spectator') => {
+        const hostIsPlaying = (initialRole !== 'spectator')
+        const p1Active = hostIsPlaying || (live.current.player1Conn !== null && live.current.player1Conn.open && live.current.player1Conn !== conn)
+        const p2Active = (live.current.player2Conn !== null && live.current.player2Conn.open && live.current.player2Conn !== conn)
+
+        // Clear conn from previous assignment if re-assigning
+        if (live.current.player1Conn === conn) live.current.player1Conn = null
+        if (live.current.player2Conn === conn) live.current.player2Conn = null
+        live.current.spectatorConns.delete(conn)
+
+        let roleToAssign: UserRole = 'spectator'
+        if (preferredRole === 'spectator') {
+          roleToAssign = 'spectator'
+        } else {
+          if (!p1Active) roleToAssign = 1
+          else if (!p2Active) roleToAssign = 2
+          else roleToAssign = 'spectator'
+        }
+
+        if (roleToAssign === 1) {
+          live.current.player1Conn = conn
+        } else if (roleToAssign === 2) {
+          live.current.player2Conn = conn
+        } else {
+          live.current.spectatorConns.add(conn)
+          setSpectatorCount(live.current.spectatorConns.size)
+        }
+
+        const slotsOpen = (!p1Active || !p2Active)
+
+        conn.send({
+          type: 'ASSIGNED_ROLE',
+          role: roleToAssign,
+          spectatorCount: live.current.spectatorConns.size,
+          availablePlayerSlots: slotsOpen,
+        } as PeerMessage)
+
+        const state = live.current.state
+        if (state) {
+          conn.send({
+            type: 'GAME_STATE',
+            state,
+            spectatorCount: live.current.spectatorConns.size,
+          } as PeerMessage)
+          if (live.current.p1Draft) {
+            conn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft: live.current.p1Draft } as PeerMessage)
+          }
+          if (live.current.p2Draft) {
+            conn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: live.current.p2Draft } as PeerMessage)
+          }
+        }
+
+        if (hostIsPlaying && live.current.player2Conn?.open) {
+          setStatus('playing')
+        }
+
+        broadcastToAll({
+          type: 'SPECTATOR_COUNT',
+          spectatorCount: live.current.spectatorConns.size,
+        })
+      }
 
       peer.on('connection', (conn: DataConnection) => {
         conn.on('open', () => {
-          const state = live.current.state
-          const player2Active = live.current.player2Conn !== null && live.current.player2Conn.open
-
-          if (!player2Active) {
-            live.current.player2Conn = conn
-            conn.send({
-              type: 'ASSIGNED_ROLE',
-              role: 2,
-              spectatorCount: live.current.spectatorConns.size,
-            } as PeerMessage)
-            if (state) {
-              conn.send({
-                type: 'GAME_STATE',
-                state,
-                spectatorCount: live.current.spectatorConns.size,
-              } as PeerMessage)
-            }
-            setStatus('playing')
-          } else {
-            live.current.spectatorConns.add(conn)
-            setSpectatorCount(live.current.spectatorConns.size)
-            conn.send({
-              type: 'ASSIGNED_ROLE',
-              role: 'spectator',
-              spectatorCount: live.current.spectatorConns.size,
-            } as PeerMessage)
-            if (state) {
-              conn.send({
-                type: 'GAME_STATE',
-                state,
-                spectatorCount: live.current.spectatorConns.size,
-              } as PeerMessage)
-              if (live.current.hostDraft) {
-                conn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft: live.current.hostDraft } as PeerMessage)
-              }
-              if (live.current.clientDraft) {
-                conn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: live.current.clientDraft } as PeerMessage)
-              }
-            }
-            broadcastToAll({
-              type: 'SPECTATOR_COUNT',
-              spectatorCount: live.current.spectatorConns.size,
-            })
-          }
+          assignConnRole(conn)
         })
 
         conn.on('data', (raw: unknown) => {
           const msg = raw as PeerMessage
           const current = live.current.state
           if (!current) return
+
+          if (msg.type === 'REQUEST_ROLE') {
+            assignConnRole(conn, msg.preferredRole)
+            return
+          }
 
           if (msg.type === 'REQUEST_STATE') {
             const clientIsAhead = msg.lastTurn > current.turn
@@ -200,9 +235,10 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
               return
             }
 
-            if (conn === live.current.player2Conn) {
-              live.current.clientPendingPlan = null
-              setWaitingForPartner(false)
+            if (conn === live.current.player1Conn) {
+              live.current.p1PendingPlan = null
+            } else if (conn === live.current.player2Conn) {
+              live.current.p2PendingPlan = null
             }
 
             conn.send({
@@ -214,50 +250,54 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
           }
 
           if (msg.type === 'DRAFT_UPDATE') {
-            if (conn === live.current.player2Conn) {
-              live.current.clientDraft = msg.draft
-              // Forward draft update from Player 2 to all spectators
+            if (conn === live.current.player1Conn) {
+              live.current.p1Draft = msg.draft
+              updateSpectatorDraftState(1, msg.draft, current)
               live.current.spectatorConns.forEach((sConn) => {
-                if (sConn.open) {
-                  sConn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: msg.draft } as PeerMessage)
-                }
+                if (sConn.open) sConn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft: msg.draft } as PeerMessage)
+              })
+            } else if (conn === live.current.player2Conn) {
+              live.current.p2Draft = msg.draft
+              updateSpectatorDraftState(2, msg.draft, current)
+              live.current.spectatorConns.forEach((sConn) => {
+                if (sConn.open) sConn.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft: msg.draft } as PeerMessage)
               })
             }
             return
           }
 
           if (msg.type !== 'SUBMIT_PLAN') return
-          if (conn !== live.current.player2Conn) return
           if (msg.plan.turn !== current.turn) return
 
-          live.current.clientPendingPlan = msg.plan
-          checkExecutionTrigger()
+          if (conn === live.current.player1Conn) {
+            live.current.p1PendingPlan = msg.plan
+            checkExecutionTrigger()
+          } else if (conn === live.current.player2Conn) {
+            live.current.p2PendingPlan = msg.plan
+            checkExecutionTrigger()
+          }
         })
 
         conn.on('close', () => {
-          if (live.current.player2Conn === conn) {
-            live.current.player2Conn = null
-          } else if (live.current.spectatorConns.has(conn)) {
-            live.current.spectatorConns.delete(conn)
-            setSpectatorCount(live.current.spectatorConns.size)
-            broadcastToAll({
-              type: 'SPECTATOR_COUNT',
-              spectatorCount: live.current.spectatorConns.size,
-            })
-          }
+          if (live.current.player1Conn === conn) live.current.player1Conn = null
+          if (live.current.player2Conn === conn) live.current.player2Conn = null
+          live.current.spectatorConns.delete(conn)
+          setSpectatorCount(live.current.spectatorConns.size)
+          broadcastToAll({
+            type: 'SPECTATOR_COUNT',
+            spectatorCount: live.current.spectatorConns.size,
+          })
         })
 
         conn.on('error', () => {
-          if (live.current.player2Conn === conn) {
-            live.current.player2Conn = null
-          } else if (live.current.spectatorConns.has(conn)) {
-            live.current.spectatorConns.delete(conn)
-            setSpectatorCount(live.current.spectatorConns.size)
-            broadcastToAll({
-              type: 'SPECTATOR_COUNT',
-              spectatorCount: live.current.spectatorConns.size,
-            })
-          }
+          if (live.current.player1Conn === conn) live.current.player1Conn = null
+          if (live.current.player2Conn === conn) live.current.player2Conn = null
+          live.current.spectatorConns.delete(conn)
+          setSpectatorCount(live.current.spectatorConns.size)
+          broadcastToAll({
+            type: 'SPECTATOR_COUNT',
+            spectatorCount: live.current.spectatorConns.size,
+          })
         })
       })
 
@@ -271,6 +311,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       })
 
       return () => {
+        live.current.player1Conn?.close()
         live.current.player2Conn?.close()
         live.current.spectatorConns.forEach((sConn) => sConn.close())
         peer.destroy()
@@ -327,6 +368,9 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
             if (msg.type === 'ASSIGNED_ROLE') {
               setAssignedRole(msg.role)
               setSpectatorCount(msg.spectatorCount)
+              if (msg.availablePlayerSlots !== undefined) {
+                setAvailablePlayerSlots(msg.availablePlayerSlots)
+              }
               if (msg.role === 'spectator') {
                 setStatus('spectating')
               } else {
@@ -382,28 +426,28 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
         activePeer.current = null
       }
     }
-  }, [roomCode, playerRole, settings, syncState, checkExecutionTrigger, broadcastToAll, updateSpectatorDraftState])
+  }, [roomCode, initialRole, settings, syncState, checkExecutionTrigger, broadcastToAll, updateSpectatorDraftState])
 
   const sendDraftUpdate = useCallback((draft: DraftPlan) => {
     if (assignedRole === 'spectator') return
 
-    if (playerRole === 1) {
-      live.current.hostDraft = draft
-      // Broadcast Host's draft to all spectators
+    if (settings !== null) {
+      live.current.p1Draft = draft
+      updateSpectatorDraftState(1, draft, live.current.state)
       live.current.spectatorConns.forEach((sConn) => {
         if (sConn.open) {
           sConn.send({ type: 'DRAFT_UPDATE', playerRole: 1, draft } as PeerMessage)
         }
       })
     } else {
-      live.current.clientConn?.send({ type: 'DRAFT_UPDATE', playerRole: 2, draft } as PeerMessage)
+      live.current.clientConn?.send({ type: 'DRAFT_UPDATE', playerRole: (assignedRole === 2 ? 2 : 1), draft } as PeerMessage)
     }
-  }, [assignedRole, playerRole])
+  }, [assignedRole, settings, updateSpectatorDraftState])
 
   const submitPlan = useCallback((plan: TurnPlan) => {
     if (assignedRole === 'spectator') return
 
-    if (playerRole === 1) {
+    if (settings !== null) {
       const current = live.current.state
       if (!current) return
 
@@ -414,16 +458,22 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
       live.current.clientConn?.send({ type: 'SUBMIT_PLAN', plan } as PeerMessage)
       setWaitingForPartner(true)
     }
-  }, [assignedRole, playerRole, checkExecutionTrigger])
+  }, [assignedRole, settings, checkExecutionTrigger])
+
+  const requestRole = useCallback((preferredRole: 'player' | 'spectator') => {
+    if (live.current.clientConn?.open) {
+      live.current.clientConn.send({ type: 'REQUEST_ROLE', preferredRole } as PeerMessage)
+    }
+  }, [])
 
   const startNextRound = useCallback(() => {
-    if (playerRole !== 1) return
+    if (settings === null) return
     const current = live.current.state
     if (!current) return
 
     const nextState = buildNextRoundState(current)
-    live.current.hostDraft = null
-    live.current.clientDraft = null
+    live.current.p1Draft = null
+    live.current.p2Draft = null
     setSpectatorDrafts({ chaserDraft: null, evaderDraft: null })
 
     syncState(nextState)
@@ -434,7 +484,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     })
     broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 1, draft: null })
     broadcastToAll({ type: 'DRAFT_UPDATE', playerRole: 2, draft: null })
-  }, [playerRole, syncState, broadcastToAll])
+  }, [settings, syncState, broadcastToAll])
 
   return {
     gameState,
@@ -447,5 +497,7 @@ export function useHexGame(roomCode: string, playerRole: 1 | 2, settings: MatchS
     spectatorCount,
     spectatorDrafts,
     sendDraftUpdate,
+    availablePlayerSlots,
+    requestRole,
   }
 }

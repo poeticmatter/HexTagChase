@@ -4,7 +4,7 @@ import { mapRegistry } from '../lib/mapRegistry'
 import { MapThumbnail } from './MapThumbnail'
 
 interface LobbyFormState {
-  hostRole: 'Chaser' | 'Evader'
+  hostRole: 'Chaser' | 'Evader' | 'Spectator'
   mapId: string
   transport: Transport
   startingMovementPoints: number
@@ -13,7 +13,7 @@ interface LobbyFormState {
 const DEFAULT_FORM: LobbyFormState = {
   hostRole: 'Chaser',
   mapId: mapRegistry.getAllMaps()[0].id,
-  transport: 'async',
+  transport: 'live',
   startingMovementPoints: 10,
 }
 
@@ -53,7 +53,7 @@ export function Lobby({ onCreateGame }: Props) {
             Your Role
           </label>
           <div className="flex rounded-lg overflow-hidden border border-neutral-700">
-            {(['Chaser', 'Evader'] as const).map(role => (
+            {(['Chaser', 'Evader', 'Spectator'] as const).map(role => (
               <button
                 key={role}
                 onClick={() => setForm(f => ({ ...f, hostRole: role }))}
@@ -61,7 +61,9 @@ export function Lobby({ onCreateGame }: Props) {
                   form.hostRole === role
                     ? role === 'Chaser'
                       ? 'bg-red-700 text-white'
-                      : 'bg-blue-700 text-white'
+                      : role === 'Evader'
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-purple-800 text-white'
                     : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
                 }`}
               >
@@ -69,6 +71,11 @@ export function Lobby({ onCreateGame }: Props) {
               </button>
             ))}
           </div>
+          {form.hostRole === 'Spectator' && (
+            <p className="text-xs text-purple-400 leading-relaxed mt-1">
+              You will host the room as a Spectator. The next two players who join will play as Chaser and Evader.
+            </p>
+          )}
         </div>
 
         {/* Movement pool settings */}
