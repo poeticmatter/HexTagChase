@@ -1,5 +1,5 @@
 {
-  "name": "Coupled Colors",
-  "description": "A two-player cooperative sliding puzzle where each player sees the same blocks in different color pairings, and every move affects both boards.",
+  "name": "Hex Tag",
+  "description": "A two-player hex-grid game of tag where both players secretly commit a move and a prediction of the opponent's destination each turn.",
   "requestFramePermissions": []
 }

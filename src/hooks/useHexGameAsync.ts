@@ -8,6 +8,7 @@ import {
   submitPlan as submitPlanRemote,
   startNextRound as startNextRoundRemote,
   type GameRow,
+  GAMES_TABLE,
 } from '../lib/asyncGameApi'
 
 /**
@@ -15,7 +16,7 @@ import {
  * useHexGame so App's ActiveGame renders identically regardless of transport.
  *
  * Unlike the PeerJS host, no browser needs to stay online: the authoritative state
- * lives in the `games` row, turn resolution runs in whichever client submits second
+ * lives in the `hextag_games` row, turn resolution runs in whichever client submits second
  * (see asyncGameApi.submitPlan), and Realtime syncs the board to anyone watching.
  */
 
@@ -49,7 +50,7 @@ export function useHexGameAsync(
       .channel(`game:${roomCode}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${roomCode}` },
+        { event: 'UPDATE', schema: 'public', table: GAMES_TABLE, filter: `id=eq.${roomCode}` },
         payload => {
           if (!cancelled) setRow(payload.new as GameRow)
         },

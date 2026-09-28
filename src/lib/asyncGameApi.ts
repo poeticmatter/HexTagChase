@@ -12,9 +12,10 @@ import { getSupabase } from './supabaseClient'
  * missing row on {@link loadGame}, which is normal control flow and returns null.
  */
 
-const TABLE = 'games'
+/** Each game on the shared Supabase project owns its own table, prefixed with the game id. */
+export const GAMES_TABLE = 'hextag_games'
 
-/** Shape of a row in the `games` table. */
+/** Shape of a row in the `hextag_games` table. */
 export interface GameRow {
   id: string
   settings: MatchSettings
@@ -35,7 +36,7 @@ export async function createGame(code: string, settings: MatchSettings): Promise
   const state = buildInitialState(settings)
 
   const { error } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .upsert({ id: code, settings, state, p2_joined: false }, { onConflict: 'id', ignoreDuplicates: true })
 
   if (error) throw error
@@ -44,7 +45,7 @@ export async function createGame(code: string, settings: MatchSettings): Promise
 /** Loads a game by room code. Returns null when no such room exists. */
 export async function loadGame(code: string): Promise<GameRow | null> {
   const { data, error } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .select('*')
     .eq('id', code)
     .maybeSingle()
@@ -56,7 +57,7 @@ export async function loadGame(code: string): Promise<GameRow | null> {
 /** Marks the evader as present so the host can advance from waiting to playing. */
 export async function joinGameAsPlayer2(code: string): Promise<void> {
   const { error } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .update({ p2_joined: true })
     .eq('id', code)
 
@@ -76,7 +77,7 @@ export async function submitPlan(code: string, role: 1 | 2, plan: TurnPlan): Pro
   const planColumn = role === 1 ? 'p1_plan' : 'p2_plan'
 
   const { error: writeError } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .update({ [planColumn]: plan })
     .eq('id', code)
     .eq('state->>turn', plan.turn)
@@ -93,7 +94,7 @@ export async function submitPlan(code: string, role: 1 | 2, plan: TurnPlan): Pro
   const nextState = processPhase(row.state, row.p1_plan, row.p2_plan)
 
   const { error: resolveError } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .update({
       state: nextState,
       p1_plan: null,
@@ -117,7 +118,7 @@ export async function startNextRound(code: string, currentRound: number): Promis
   const nextState = buildNextRoundState(row.state)
 
   const { error } = await getSupabase()
-    .from(TABLE)
+    .from(GAMES_TABLE)
     .update({ state: nextState, updated_at: new Date().toISOString() })
     .eq('id', code)
     .eq('state->matchState->>roundNumber', currentRound)

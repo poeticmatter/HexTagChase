@@ -1,10 +1,10 @@
 {
-  "name": "coupled-colors",
+  "name": "hex-tag-chase",
   "private": true,
   "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/poeticmatter/Parralex"
+    "url": "https://github.com/poeticmatter/HexTagChase"
   },
   "type": "module",
   "scripts": {
